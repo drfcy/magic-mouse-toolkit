@@ -1,98 +1,70 @@
-# Magic Mouse Toolkit
+# Magic Mouse Toolkit（个人修改版）
 
-Magic Mouse Toolkit is an open-source macOS utility that adds configurable gestures
-and a virtual trackpad mode to Apple Magic Mouse.
+这是基于 [mori0818/Magic Mouse Toolkit](https://github.com/mori0818/magic-mouse-toolkit) 修改的 macOS 工具，用 Apple Magic Mouse 实现可配置的轻点操作和“触控板模式”。本仓库保留原项目的来源与许可证信息，并在此基础上加入中文界面和个人功能调整；它不是原作者发布的官方版本。
 
-The UI supports Japanese and English (follows the system's `AppleLanguages` setting).
+## 这个版本改了什么
 
-## Features
+- 设置界面整理为“常用”“触控板模式”“鼠标模式”“高级与诊断”四个类别。
+- 新增简体中文界面，并保留英文和日文。
+- 可从菜单栏直接开关触控板模式，也可设置应用启动后自动开启。
+- 可选触控板式轻点（单指左键、双指右键）或左右分区式点击。
+- 增加光标加速度，并可分别调整慢速移动的基础倍率与快速移动的加速。
+- 支持鼠标横向摆放时调整光标移动方向和轨迹比例。
 
-- Left/right click via one-finger tap
-- Left click via two-finger tap
-- Middle click via two-finger physical click
-- Play back a recorded keyboard macro with a three-finger tap
-- Virtual trackpad mode: stroke the Magic Mouse surface with one finger
-- Two-finger scrolling and native inertia while in virtual trackpad mode
-- Toggle modes with a three-finger double tap
-- Input isolation from the MacBook's built-in trackpad
-- Magic Mouse battery level display
-- Cursor speed boost
-- Tap zone, sensitivity, and scroll settings configurable from the UI
+## 要求
 
-## Requirements
-
-- macOS 26 or later
+- macOS 26 或更高版本
 - Apple Magic Mouse
-- Xcode, or a Swift toolchain that includes the macOS 26 SDK, to build
-- Accessibility permission for click synthesis, macros, and input remapping
+- 构建需要 Xcode，或包含 macOS 26 SDK 的 Swift 工具链
+- 执行点击合成、宏和输入映射需要“辅助功能”权限
 
-This app uses Apple's private `MultitouchSupport.framework` and IOKit SPIs.
-It may stop working after a future macOS update and is not intended for the Mac App Store.
+本程序使用 Apple 的私有 `MultitouchSupport.framework` 和 IOKit 接口，macOS 更新后可能需要调整，也不适用于 Mac App Store 发布。
 
-## Safety
+## 构建和运行
 
-**Do not turn off or remove Accessibility permission from System Settings while Magic Mouse Toolkit is running.**
-
-Changing this permission while an app using CGEventTap is running can freeze macOS system input.
-If you need to change the permission, quit Magic Mouse Toolkit normally from the menu bar first.
-Do not use `tccutil reset` as part of normal setup or troubleshooting.
-
-See [SAFETY.md](./SAFETY.md) for details.
-
-## Build
+请明确检出个人修改分支；仓库的 `main` 分支仍对应原项目的主线。
 
 ```sh
-git clone https://github.com/mori0818/magic-mouse-toolkit.git
+git clone --branch drfcy-custom-edition --single-branch https://github.com/drfcy/magic-mouse-toolkit.git
 cd magic-mouse-toolkit
 ./build.sh
 open "build/Magic Mouse Toolkit.app"
 ```
 
-If `SIGN_ID` is not set, an ad-hoc signature is used.
+默认使用 ad-hoc 签名。如有自己的签名身份，可通过 `SIGN_ID` 指定：
 
 ```sh
-SIGN_ID="Developer ID Application: Example (TEAMID)" ./build.sh
+SIGN_ID="Developer ID Application: Your Name (TEAMID)" ./build.sh
 ```
 
-You can also specify a local self-signed certificate via `SIGN_ID`. Do not commit
-certificates or private keys to the repository. Changing the signature may cause macOS
-to ask you to re-grant Accessibility permission — in that case too, quit the old app
-before changing the permission.
+不要把签名证书或私钥提交到仓库。更换签名后，macOS 可能要求重新授权；请先退出旧版本，再修改权限。
 
-## Privacy
+## 隐私
 
-- The app itself has no telemetry, analytics SDKs, or network transmission.
-- While recording a macro, keyboard key codes, modifier keys, press state, and timing
-  are saved to UserDefaults on-device. No strings or input content are sent externally.
-- Do not record a macro while entering passwords or secrets.
-- Diagnostic logs are saved to `~/Library/Logs/MagicMouseToolkit.log` and rotate at
-  about 1 MiB. Logs may contain operational metadata such as gesture decisions and coordinates.
+- 程序本身不包含遥测、分析 SDK 或网络传输功能。
+- 录制宏时，按键代码、修饰键、按下状态和时间间隔会保存在本机的 UserDefaults 中；不会保存或发送按键对应的文字内容。请勿在输入密码或其他秘密信息时录制。
+- 诊断日志保存在 `~/Library/Logs/MagicMouseToolkit.log`，约 1 MiB 后轮换；日志可能包含手势判断、坐标等运行信息。
 
-## System-wide settings
+## 系统鼠标速度
 
-The cursor speed boost temporarily changes the system-wide `HIDMouseAcceleration` value.
-It's restored on normal quit, but if the speed stays changed after a force quit, quit
-Magic Mouse Toolkit and then move the "System Settings → Mouse → Tracking speed" slider
-to restore it.
+系统指针速度增强会暂时修改全局 `HIDMouseAcceleration`，正常退出时会恢复。如果程序被强制退出后速度没有恢复，请先退出程序，再到“系统设置 → 鼠标”移动一次“跟踪速度”滑块。
 
-## Documentation
+## 使用前请留意
 
-- [SAFETY.md](./SAFETY.md) — Safety information on permission changes, input freezes, and speed settings
-- [SPEC.md](./SPEC.md) — Feature specification
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — Architecture and third-party code provenance
-- [IMPLEMENTATION.md](./IMPLEMENTATION.md) — Implementation details
-- [UI_DESIGN.md](./UI_DESIGN.md) — UI and design policy
-- [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) — Third-party code and licenses
-- [CONTRIBUTING.md](./CONTRIBUTING.md) — How to contribute
-- [SECURITY.md](./SECURITY.md) — How to report vulnerabilities
+程序运行时不要在系统设置中关闭或移除它的“辅助功能”权限。若要更改权限，请先从菜单栏正常退出程序，再修改权限并重新打开。权限操作不当可能导致系统输入暂时失灵。更多说明见 [SAFETY.md](./SAFETY.md)。
 
-## Third-party work
+## 来源与许可证
 
-Magic Mouse Toolkit started in part from MouseToucher's MIT-licensed code and design,
-and references/adapts MiddleClick's GPL-3.0 implementation. See
-[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for provenance and full license text.
+本项目是原项目的衍生修改版本。原项目为 [mori0818/Magic Mouse Toolkit](https://github.com/mori0818/magic-mouse-toolkit)。它本身也记录了所借鉴的第三方项目及其许可。请保留仓库中的 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)、[LICENSE](./LICENSE) 和相关版权声明。
 
-## License
+本项目按 GNU GPL v3.0 only 发布。第三方代码来源及许可说明见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
 
-Magic Mouse Toolkit is licensed under the GNU General Public License v3.0 only.
-See [LICENSE](./LICENSE).
+## 其他文档
+
+- [SAFETY.md](./SAFETY.md)：权限修改、输入异常与系统鼠标速度
+- [SPEC.md](./SPEC.md)：功能规格
+- [ARCHITECTURE.md](./ARCHITECTURE.md)：架构与代码来源
+- [IMPLEMENTATION.md](./IMPLEMENTATION.md)：实现细节
+- [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)：第三方代码与许可证
+- [CONTRIBUTING.md](./CONTRIBUTING.md)：贡献指南
+- [SECURITY.md](./SECURITY.md)：安全问题反馈

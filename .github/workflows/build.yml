@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, drfcy-custom-edition]
   pull_request:
 
 permissions:

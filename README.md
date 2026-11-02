@@ -8,6 +8,31 @@
 
 本项目沿用并扩展了原项目的代码，保留其来源、许可证和第三方代码说明；它不是原作者发布的官方版本。个人修改目前位于 [`drfcy-custom-edition` 分支](https://github.com/drfcy/magic-mouse-toolkit/tree/drfcy-custom-edition)。
 
+## 下载与安装
+
+**[下载 Magic Mouse Toolkit Personal v1.0.0（macOS）](https://github.com/drfcy/magic-mouse-toolkit/releases/download/v1.0.0/Magic-Mouse-Toolkit-Personal-v1.0.0-macOS.zip)** · [查看版本说明](https://github.com/drfcy/magic-mouse-toolkit/releases/tag/v1.0.0)
+
+- 要求：macOS 26 或更高版本；支持 Apple 芯片和 Intel Mac；需要 Apple Magic Mouse。
+- 下载并解压 ZIP，将 `Magic Mouse Toolkit.app` 拖入“应用程序”文件夹后打开。
+- 应用需要“辅助功能”权限才能执行点击模拟和输入处理；首次使用时按系统提示授权。
+- 当前版本使用 ad-hoc 签名，未经 Apple Developer ID 签名和公证。macOS 可能提示无法验证开发者；请先确认文件来自本仓库的 Release，再按系统的“隐私与安全性”提示允许打开。
+
+## 界面预览
+
+以下截图来自本分支构建的应用：
+
+<p align="center">
+  <img src="docs/screenshots/settings-common.png" width="48%" alt="常用设置：模式切换、启动自动开启触控板模式与滚动方向">
+  <img src="docs/screenshots/settings-trackpad.png" width="48%" alt="触控板模式设置：移动速度、加速度、点击方式与鼠标摆放方向">
+</p>
+<p align="center"><sub>常用设置（左） · 触控板模式（右）</sub></p>
+
+<p align="center">
+  <img src="docs/screenshots/settings-mouse.png" width="48%" alt="鼠标模式设置：轻点、左右区域点击和触摸范围">
+  <img src="docs/screenshots/settings-advanced.png" width="48%" alt="高级与诊断设置：轻点识别、误触防止、边界、指针速度与诊断">
+</p>
+<p align="center"><sub>鼠标模式（左） · 高级与诊断（右）</sub></p>
+
 ## 为什么做这个修改版
 
 Magic Mouse 有多点触控表面，能识别轻点、滑动和多指手势。但在我的实际使用中，它作为传统鼠标时最突出的困难是光标点选不够准确：光标会受手指在表面的接触位置影响，小幅变化也可能让指针偏移，精确点中小目标并不容易。与我使用过的罗技 GPW3（Logitech G Pro X Superlight 2）等传统鼠标相比，我认为 Magic Mouse 的优势不在于取代常规鼠标的定位精度，而在于它的触控表面和多指输入能力。

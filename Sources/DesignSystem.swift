@@ -73,6 +73,7 @@ enum DS {
 
     /// タイポグラフィの階段(2026-07-27に9→5トークンへ圧縮)。ウェイトは regular / semibold のみ。
     enum Font {
+        static let settingsTitle = SwiftUI.Font.system(size: 17, weight: .semibold)
         /// ページ見出し「詳細設定」。ページ内で最上位の見出し。戻るボタンのアイコンにも使う
         static let pageTitle = SwiftUI.Font.system(size: 13, weight: .semibold)
         /// セクション/カラムの見出し(詳細設定の Section ヘッダー、ライブ表示カードの見出し)
@@ -95,7 +96,9 @@ enum DS {
         // 高さはカード下端(contentTop 8+見出し15+間12+カード340=375)+下余白9+リム8=392で決定。
         // contentTop を 20→8 に詰めた分(12)に加え、下が余って下重心に見えないよう
         // さらに12詰めて上下の視覚的な釣り合いを取った(414→392・2026-07-28実機フィードバック)
-        static let windowSize = CGSize(width: 700, height: 392)
+        static let windowSize = CGSize(width: 760, height: 640)
+        static let settingsIconSide: CGFloat = 40
+        static let settingsControlWidth: CGFloat = 280
         /// コンテンツ左右の余白。左右対称にするため両辺で同じ値を使う(2026-07-27)。
         /// 全体が広く見えるとの実機フィードバックで 40→32 に詰めた(2026-07-28)。
         /// 内訳: 32 + mainColumnWidth 328 + columnGap 44 + カード幅 264 + 32 = 700

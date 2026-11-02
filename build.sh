@@ -27,7 +27,8 @@ rm -rf "build/$APP"
 mkdir -p "build/$APP/Contents/MacOS" "build/$APP/Contents/Resources"
 cp Info.plist "build/$APP/Contents/"
 cp build/$BIN "build/$APP/Contents/MacOS/"
-cp -R Resources/ja.lproj Resources/en.lproj "build/$APP/Contents/Resources/"
+cp Resources/AppIcon.icns "build/$APP/Contents/Resources/"
+cp -R Resources/ja.lproj Resources/en.lproj Resources/zh-Hans.lproj "build/$APP/Contents/Resources/"
 
 # iCloud Drive 配下では com.apple.FinderInfo / fileprovider 拡張属性が
 # 署名の直前に再付与されることがあり codesign が失敗するため、リトライ付きで署名する

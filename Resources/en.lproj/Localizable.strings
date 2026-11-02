@@ -30,6 +30,14 @@
 
 /* メイン設定トグル */
 "1本指タップで左/右クリック" = "1-finger tap for left/right click";
+"横置きカーソルの横縦比" = "Sideways cursor aspect ratio";
+"1本指タップのカーソル防振範囲" = "One-finger tap cursor stability";
+"指を置いた直後の小さな触点中心の揺れを無視します。範囲を超える動きは全量を反映します。0%でオフ。通常・横置きの両方に適用します" = "Ignore small contact-centre shifts when a finger first touches the mouse. Once movement exceeds the radius, all movement is restored. Set 0% to disable. Applies in both upright and sideways modes.";
+"丸い軌跡が細長く見えるときは値を上げ、横に広がりすぎるときは下げます。1.00は補正前の比率です。通常の置き方とスクロールには影響しません" = "Increase this if the sideways cursor path looks too narrow, or decrease it if the path looks too wide. 1.00 restores the previous ratio. Upright movement and scrolling are unchanged.";
+"1本指タップで左クリック・2本指タップで右クリック" = "1-finger tap: left click; 2-finger tap: right click";
+"1本指タップは位置で左/右・2本指タップは左クリック" = "1-finger tap: left/right by position; 2-finger tap: left click";
+"タップ位置で左右クリックを区別" = "Choose left/right click by tap position";
+"オフ: 1本指タップは左クリック、2本指タップは右クリック。オン: 1本指は左右の位置で区別し、2本指タップは左クリック" = "Off: one-finger tap is left click and two-finger tap is right click. On: one-finger tap uses left/right zones and two-finger tap is left click.";
 "タップは常に左クリック(右クリックは物理クリックのみ)" = "Tap is always left-click (right-click via physical click only)";
 
 /* 詳細設定スライダーラベル */
@@ -168,6 +176,7 @@
 
 /* 詳細設定キャプション */
 "マウス表面のなぞりをカーソル移動に変換する際の倍率です。3本指ダブルタップ、または下のボタンでモードのON/OFFを切り替えます" = "The multiplier used to convert swipes on the mouse surface into cursor movement. Toggle the mode on/off with a 3-finger double tap or the button below";
+"マウス表面のなぞりをカーソル移動に変換する際の倍率です。メニューバー、3本指ダブルタップ、または下のボタンでモードのON/OFFを切り替えます" = "The multiplier used to convert swipes on the mouse surface into cursor movement. Toggle the mode from the menu bar, with a 3-finger double tap, or with the button below.";
 
 /* 詳細設定キャプション */
 "マウス表面の先端(指先側)からこの割合までをタップに反応させます。初期値は25%です" = "Taps are recognized from the fingertip-side edge of the mouse surface up to this percentage. The default is 25%";
@@ -355,3 +364,84 @@
 
 /* マクロ録画中の件数表示 */
 "録画中… %dイベント" = "Recording… %d events";
+
+/* Trackpad mode orientation */
+"マウスの置き方" = "Mouse Orientation";
+"通常（先端が上）" = "Upright (narrow end up)";
+"横置き（先端が右）" = "Sideways (narrow end right)";
+"横置き（先端が左）" = "Sideways (narrow end left)";
+"横置きでは、マウス表面のなぞりとマウス自身のスクロール方向を画面に合わせて回転します。ほかのマウスとトラックパッドには影響しません" = "Sideways mode rotates cursor movement and Magic Mouse scrolling to match the screen. Other mice and Magic Trackpads are unaffected.";
+"カーソル加速度" = "Cursor Acceleration";
+"起動時にトラックパッドモードを有効化" = "Start in Trackpad Mode";
+"タップしてからもう一度触れてドラッグ" = "Tap, then touch again to drag";
+"左ボタンを押しながらドラッグ" = "Press mouse to drag";
+"マウスの左ボタンを押したまま表面をなぞるとドラッグします。ボタンを離すとドロップします" = "Press anywhere on the Magic Mouse and hold, then move a finger to drag. Release the press to drop. With left/right zones enabled, use the left-click area.";
+"左クリックの軽いタップ後、もう一度指を置いて動かすとドラッグします。指を離すとドロップ。2回目を動かさず離せば通常のダブルクリックです" = "After a left tap, touch again and move to drag; lift to drop. A second touch without movement remains a normal double-click.";
+"ゆっくり動かすと移動ゲインを保ち、素早く一方向になぞると倍率を滑らかに上げます。0で従来の一定倍率に戻ります。1本指のカーソル移動だけに適用します" = "Slow movement keeps the base gain; a fast, sustained stroke smoothly increases it. Set 0 to restore constant gain. Applies only to one-finger cursor movement.";
+
+/* Settings categories and task-oriented controls */
+"常用" = "General";
+"鼠标模式" = "Mouse Mode";
+"高级与诊断" = "Advanced & Diagnostics";
+"已暂停" = "Paused";
+"当前模式" = "Current mode";
+"当前正在使用" = "Currently active";
+"当前未启用，可预先调整" = "Inactive; settings can be prepared";
+"使用状态" = "Status";
+"启用鼠标增强" = "Enable mouse enhancements";
+"使用模式" = "Input mode";
+"鼠标模式保留原生移动；触控板模式用手指滑动控制光标。" = "Mouse mode keeps native movement; Trackpad mode moves the cursor by touch.";
+"鼠标" = "Mouse";
+"触控板" = "Trackpad";
+"应用启动且权限就绪后自动开启；手动切换模式不受影响。" = "Activate after launch when permission is ready. Manual mode changes are preserved during the session.";
+"设备" = "Device";
+"未检测到妙控鼠标" = "Magic Mouse not detected";
+"辅助功能权限" = "Accessibility permission";
+"已授权" = "Granted";
+"打开权限设置…" = "Open permission settings…";
+"共用操作" = "Shared controls";
+"滚动方向" = "Scroll directions";
+"鼠标模式与触控板模式共用。" = "Shared by Mouse and Trackpad modes.";
+"上下与左右" = "Vertical and horizontal";
+"仅上下" = "Vertical only";
+"三指快捷操作" = "Three-finger shortcut";
+"菜单栏保留触控板模式快捷开关。" = "Trackpad Mode can also be toggled from the menu bar.";
+"操作" = "Action";
+"双击切换使用模式" = "Double-tap to switch modes";
+"轻点执行按键宏" = "Tap to run a key macro";
+"光标移动" = "Cursor movement";
+"基础移动速度" = "Base movement speed";
+"控制慢速移动与精细瞄准时的光标距离。" = "Cursor distance for slow movement and precise aiming.";
+"快速移动加速" = "Fast movement acceleration";
+"快速连续滑动时提高倍率，减速后回到基础速度。0 表示关闭。" = "Increase gain during sustained fast movement; slow down to return to base speed. Set 0 to disable.";
+"点击与拖动" = "Clicking and dragging";
+"点击方式" = "Click style";
+"触控板式" = "Trackpad style";
+"左右分区式" = "Left/right zones";
+"单指轻点按左右区域区分；双指轻点为左键。" = "One finger uses left/right zones; two fingers tap for left click.";
+"单指轻点为左键；双指轻点为右键。" = "One-finger tap: left click. Two-finger tap: right click.";
+"右键区域起点" = "Right-click zone starts at";
+"双轻点拖动" = "Double-tap dragging";
+"第二次轻触后不抬手，滑动即可拖动；抬手放下。" = "After the second touch, keep your finger down and move to drag; lift to drop.";
+"摆放方向" = "Orientation";
+"鼠标摆放" = "Mouse orientation";
+"横置光标横纵比例" = "Sideways cursor aspect ratio";
+"轨迹偏瘦就调大，偏扁就调小。" = "Increase if the path is too narrow; decrease if too wide.";
+"恢复此页默认设置" = "Reset this page";
+"轻点点击" = "Tap clicking";
+"单指轻点点击" = "One-finger tap to click";
+"单指点击方式" = "One-finger click style";
+"按左右区域区分" = "Use left/right zones";
+"始终执行左键" = "Always left click";
+"轻点响应范围" = "Tap area";
+"前端响应范围" = "Tap depth from the head";
+"从鼠标头部向后，只在此范围内识别轻点。" = "Recognize taps only within this depth from the mouse head.";
+"更细的触摸区域边界在高级与诊断中调整。" = "Fine-tune touch boundaries in Advanced & Diagnostics.";
+"轻点识别参数" = "Tap recognition parameters";
+"恢复本组默认设置" = "Reset this group";
+"鼠标模式 · 触摸区域边界" = "Mouse mode · Touch boundaries";
+"系统指针速度增强" = "System pointer speed boost";
+"系统鼠标轨迹速度" = "System mouse tracking speed";
+"影响系统鼠标速度；与手指控制光标的基础移动速度分开。" = "Changes system mouse speed, separately from the touch-controlled base speed.";
+"诊断信息" = "Diagnostics";
+"显示触点与轻点判定" = "Show contacts and tap decisions";

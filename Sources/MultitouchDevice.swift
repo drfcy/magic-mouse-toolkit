@@ -141,6 +141,9 @@ final class MultitouchDeviceManager {
         }
         activeDevices = matched
         MMTLog.log("タッチ監視開始: \(matched.count)台")
+        // Bluetooth reconnection can assign a new HID sender ID. Refresh the
+        // trackpad pass-through list whenever multitouch devices are enumerated.
+        EventInterceptor.shared.refreshMultitouchScrollSources()
     }
 
     func stop() {

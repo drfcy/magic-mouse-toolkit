@@ -39,6 +39,17 @@ struct SettingsSnapshot {
 
     // 仮想トラックパッドモード
     var trackpadModeGain: Double
+    /// Additional gain for sustained fast one-finger travel; zero is legacy linear motion.
+    var trackpadAccelerationStrength: Double
+    var trackpadModeOrientation: Int
+    /// Trackpad mode: use physical left/right touch zones instead of two-finger right tap.
+    var trackpadTapZones: Bool
+    /// A second held touch after a left tap can begin a synthetic left drag.
+    var trackpadTapDragEnabled: Bool
+    /// Emit left-drag events for surface motion while a physical left button is held.
+    var trackpadPressDragEnabled: Bool
+    /// Horizontal-to-vertical cursor aspect correction in sideways orientations.
+    var trackpadSidewaysAspectRatio: Double
 }
 
 /// UserDefaults バックの設定モデル。値変更のたびに `.settingsChanged` を通知する。
@@ -50,6 +61,7 @@ final class AppSettings {
     /// SettingsView の @AppStorage から同一キーを参照するため internal（モジュール内共有）にする。
     enum Key {
         static let enabled = "mmt.enabled"
+        static let startInTrackpadMode = "mmt.trackpad.startOnLaunch"
         static let oneFingerTapEnabled = "mmt.tap1.enabled"
         static let tapAlwaysLeftClick = "mmt.tap1.alwaysLeft"
         static let twoFingerTapEnabled = "mmt.tap2.enabled"
@@ -77,6 +89,12 @@ final class AppSettings {
         static let pointerSpeedBoost = "mmt.pointer.speedBoost"
 
         static let trackpadModeGain = "mmt.trackpad.gain"
+        static let trackpadAccelerationStrength = "mmt.trackpad.accelerationStrength"
+        static let trackpadModeOrientation = "mmt.trackpad.orientation"
+        static let trackpadTapZones = "mmt.trackpad.tapZones"
+        static let trackpadTapDragEnabled = "mmt.trackpad.tapDragEnabled"
+        static let trackpadPressDragEnabled = "mmt.trackpad.pressDragEnabled"
+        static let trackpadSidewaysAspectRatio = "mmt.trackpad.sidewaysAspectRatio"
     }
 
     /// 3本指タップの既定アクション: マクロ(未録画時は空)。
@@ -89,6 +107,7 @@ final class AppSettings {
 
     static let defaultValues: [String: Any] = [
         Key.enabled: true,
+        Key.startInTrackpadMode: true,
         Key.oneFingerTapEnabled: true,
         Key.tapAlwaysLeftClick: false,
         Key.twoFingerTapEnabled: true,
@@ -119,6 +138,12 @@ final class AppSettings {
 
         // プロトタイプ検証(2026-07-20 Step5)でゲイン調整不要と確認済みの値
         Key.trackpadModeGain: 1000.0,
+        Key.trackpadAccelerationStrength: 1.0,
+        Key.trackpadModeOrientation: 0,
+        Key.trackpadTapZones: false,
+        Key.trackpadTapDragEnabled: true,
+        Key.trackpadPressDragEnabled: false,
+        Key.trackpadSidewaysAspectRatio: 2.0,
     ]
 
     private init() {}
@@ -135,6 +160,12 @@ final class AppSettings {
     var enabled: Bool {
         get { defaults.bool(forKey: Key.enabled) }
         set { defaults.set(newValue, forKey: Key.enabled); notifyChanged() }
+    }
+
+    /// Read once at launch; changing this does not switch the current mode.
+    var startInTrackpadMode: Bool {
+        get { defaults.bool(forKey: Key.startInTrackpadMode) }
+        set { defaults.set(newValue, forKey: Key.startInTrackpadMode); notifyChanged() }
     }
     var oneFingerTapEnabled: Bool {
         get { defaults.bool(forKey: Key.oneFingerTapEnabled) }
@@ -247,6 +278,37 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: Key.trackpadModeGain); notifyChanged() }
     }
 
+    var trackpadAccelerationStrength: Double {
+        get { defaults.double(forKey: Key.trackpadAccelerationStrength) }
+        set { defaults.set(newValue, forKey: Key.trackpadAccelerationStrength); notifyChanged() }
+    }
+
+    /// 0 = upright, 1 = narrow end right, 2 = narrow end left.
+    var trackpadModeOrientation: Int {
+        get { defaults.integer(forKey: Key.trackpadModeOrientation) }
+        set { defaults.set(newValue, forKey: Key.trackpadModeOrientation); notifyChanged() }
+    }
+
+    var trackpadTapZones: Bool {
+        get { defaults.bool(forKey: Key.trackpadTapZones) }
+        set { defaults.set(newValue, forKey: Key.trackpadTapZones); notifyChanged() }
+    }
+
+    var trackpadTapDragEnabled: Bool {
+        get { defaults.bool(forKey: Key.trackpadTapDragEnabled) }
+        set { defaults.set(newValue, forKey: Key.trackpadTapDragEnabled); notifyChanged() }
+    }
+
+    var trackpadPressDragEnabled: Bool {
+        get { defaults.bool(forKey: Key.trackpadPressDragEnabled) }
+        set { defaults.set(newValue, forKey: Key.trackpadPressDragEnabled); notifyChanged() }
+    }
+
+    var trackpadSidewaysAspectRatio: Double {
+        get { defaults.double(forKey: Key.trackpadSidewaysAspectRatio) }
+        set { defaults.set(newValue, forKey: Key.trackpadSidewaysAspectRatio); notifyChanged() }
+    }
+
     /// 永続化されたキーを削除して registration domain の値に戻す。
     /// 既定値自体を変更した将来のバージョンでも正しく追従する。
     private func removeAndNotify(_ keys: [String]) {
@@ -258,6 +320,19 @@ final class AppSettings {
 
     func resetAllToDefaults() {
         removeAndNotify(Array(AppSettings.defaultValues.keys))
+    }
+
+    func resetTrackpadToDefaults() {
+        removeAndNotify([Key.trackpadModeGain, Key.trackpadAccelerationStrength,
+                         Key.trackpadModeOrientation, Key.trackpadTapZones,
+                         Key.trackpadTapDragEnabled, Key.trackpadSidewaysAspectRatio])
+    }
+
+    func resetMouseToDefaults() {
+        removeAndNotify([Key.oneFingerTapEnabled, Key.tapAlwaysLeftClick,
+                         Key.twoFingerTapEnabled, Key.middleClickEnabled,
+                         Key.rightZoneMinX, Key.zoneMinX, Key.zoneMaxX,
+                         Key.zoneMinY, Key.zoneMaxY])
     }
 
     func resetZoneToDefaults() {
@@ -297,7 +372,13 @@ final class AppSettings {
             buttonVetoWindow: buttonVetoWindow,
             twoFingerSyncWindow: twoFingerSyncWindow,
             pointerSpeedBoost: pointerSpeedBoost,
-            trackpadModeGain: trackpadModeGain
+            trackpadModeGain: trackpadModeGain,
+            trackpadAccelerationStrength: trackpadAccelerationStrength,
+            trackpadModeOrientation: trackpadModeOrientation,
+            trackpadTapZones: trackpadTapZones,
+            trackpadTapDragEnabled: trackpadTapDragEnabled,
+            trackpadPressDragEnabled: trackpadPressDragEnabled,
+            trackpadSidewaysAspectRatio: trackpadSidewaysAspectRatio
         )
     }
 }
@@ -343,5 +424,11 @@ final class SettingsStore {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
         return _snapshot.verticalScrollOnly
+    }
+
+    var trackpadModeOrientation: Int {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return _snapshot.trackpadModeOrientation
     }
 }

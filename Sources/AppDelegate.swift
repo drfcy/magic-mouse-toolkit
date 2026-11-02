@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var batteryStatusItem: NSMenuItem?
     private var openAccessibilityItem: NSMenuItem?
     private var enabledMenuItem: NSMenuItem?
+    private var trackpadModeMenuItem: NSMenuItem?
+    private var launchTrackpadActivationPending = false
 
     /// Dock/Finderから再度開かれたとき設定ウィンドウを表示する
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -24,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MMTLog.log("========== Magic Mouse Toolkit 起動 ==========")
         AppSettings.shared.registerDefaults()
+        launchTrackpadActivationPending = AppSettings.shared.startInTrackpadMode
         // イベントタップ/MTコールバック内での遅延初期化(アロケーション+オブザーバ登録)を
         // 避けるため、ここで先に初期化しておく
         _ = SettingsStore.shared.snapshot
@@ -98,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         MMTLog.log("終了")
+        TrackpadModeController.shared.stopForTermination()
         MacroRecorder.shared.stop()
         PermissionMonitor.stop()
         EventInterceptor.shared.stop()
@@ -128,12 +132,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         EventInterceptor.shared.start()
+        if launchTrackpadActivationPending {
+            launchTrackpadActivationPending = false
+            if AppSettings.shared.enabled, AppSettings.shared.startInTrackpadMode,
+               EventInterceptor.shared.isRunning, !TrackpadModeController.shared.isActive {
+                TrackpadModeController.shared.toggle()
+                trackpadModeMenuItem?.state = .on
+                MMTLog.log("起動時にトラックパッドモードを自動有効化")
+            }
+        }
     }
 
     /// PermissionMonitor がテストタップの作成失敗を検知したら呼ばれる。
     /// タップを即座に破棄し(CFMachPortInvalidate含む)、権限復帰を待つ状態に戻る。
     private func handleAccessibilityRevoked() {
         MMTLog.log("アクセシビリティ権限の喪失を検知。タップを破棄します")
+        TrackpadModeController.shared.stopForTermination()
         SharedState.shared.accessibilityGranted = false
         EventInterceptor.shared.stop()
     }
@@ -198,6 +212,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(enabledItem)
         enabledMenuItem = enabledItem
 
+        let trackpadItem = NSMenuItem(title: NSLocalizedString("トラックパッドモード", comment: "メニューバー項目"), action: #selector(toggleTrackpadMode), keyEquivalent: "")
+        trackpadItem.target = self
+        trackpadItem.state = TrackpadModeController.shared.isActive ? .on : .off
+        menu.addItem(trackpadItem)
+        trackpadModeMenuItem = trackpadItem
+
         menu.addItem(.separator())
 
         let openSettingsItem = NSMenuItem(title: NSLocalizedString("設定を開く…", comment: "メニューバー項目"), action: #selector(openSettings), keyEquivalent: ",")
@@ -227,6 +247,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppSettings.shared.enabled.toggle()
         sender.state = AppSettings.shared.enabled ? .on : .off
         MMTLog.log("有効切り替え: \(AppSettings.shared.enabled)")
+    }
+
+    @objc private func toggleTrackpadMode(_ sender: NSMenuItem) {
+        TrackpadModeController.shared.toggle()
+        sender.state = TrackpadModeController.shared.isActive ? .on : .off
     }
 
     @objc private func rediscoverDevices() {
@@ -293,6 +318,7 @@ extension AppDelegate: NSMenuDelegate {
 
         // 有効トグルの状態を同期（状態表示の後、セパレータの次）
         enabledMenuItem?.state = AppSettings.shared.enabled ? .on : .off
+        trackpadModeMenuItem?.state = TrackpadModeController.shared.isActive ? .on : .off
     }
 }
 

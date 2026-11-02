@@ -14,6 +14,7 @@ import Foundation
 /// 専用シリアルキュー上の 120Hz タイマー(drainAndPost)でのみ行う。
 final class TrackpadModeController: ObservableObject {
     static let shared = TrackpadModeController()
+    static let scrollSignature: Int64 = 0x4D4D5453
 
     private init() {
         refreshDisplayBounds()
@@ -21,6 +22,17 @@ final class TrackpadModeController: ObservableObject {
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
             self?.refreshDisplayBounds()
+        }
+        NotificationCenter.default.addObserver(
+            forName: .settingsChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            if !AppSettings.shared.enabled { self?.stopForTermination() }
+        }
+        NotificationCenter.default.addObserver(
+            forName: .settingsChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.isActive, !AppSettings.shared.enabled else { return }
+            self.deactivate()
         }
     }
 
@@ -71,8 +83,26 @@ final class TrackpadModeController: ObservableObject {
     private var accLock = os_unfair_lock()
     private var accDX: Double = 0
     private var accDY: Double = 0
+    private var accScrollX: Double = 0
+    private var accScrollY: Double = 0
     private var accClickPending = false
+    private var accClickCount = 1
+    private var accRightClickPending = false
+    private var accDragDownPending = false
+    private var accDragUpPending = false
     private var accTogglePending = false
+    /// Only the drain queue reads/writes this after posting synthetic events.
+    private var dragButtonPosted = false
+    private var lastDragLocation: CGPoint?
+
+    // Contact identities belong to the MT callback; event phases/subpixels to
+    // the drain queue. No event allocation or posting occurs in the callback.
+    private var twoFingerScroll = TwoFingerScrollTracker()
+    private var scrollOrientation = TrackpadModeOrientation.upright
+    private var suppressScrollUntilAllReleased = false
+    private var scrollSequence = TouchScrollSequence()
+    private var accScrollGestureActive = false
+    private let twoFingerScrollGain = 1000.0
 
     // 現在追跡中の指(1本のみ)。2本以上では追跡を中断し、スクロールに専念する。
     private var trackedID: Int32?
@@ -84,6 +114,13 @@ final class TrackpadModeController: ObservableObject {
     private var touchPathLength: Double = 0
     private var touchMaxVelocity: Double = 0
     private var touchFrameCount: Int = 0
+    private var touchHadPhysicalButton = false
+    private var cursorAcceleration = CursorAcceleration()
+    private var tapDrag = TapDragTracker()
+    private var pendingDragDX = 0.0
+    private var pendingDragDY = 0.0
+    private var twoFingerTap = TwoFingerTapTracker()
+    private var suppressSingleUntilAllReleased = false
 
     // モード解除用の3本指タップ追跡。MTコールバック内では数値状態だけを更新し、
     // 実際の切り替えは drainAndPost からメインキューへ渡す。
@@ -119,9 +156,19 @@ final class TrackpadModeController: ObservableObject {
         os_unfair_lock_lock(&accLock)
         accDX = 0
         accDY = 0
+        accScrollX = 0
+        accScrollY = 0
+        accScrollGestureActive = false
         accClickPending = false
+        accClickCount = 1
+        accRightClickPending = false
+        accDragDownPending = false
+        accDragUpPending = false
         accTogglePending = false
         os_unfair_lock_unlock(&accLock)
+        twoFingerScroll.reset()
+        suppressScrollUntilAllReleased = false
+        drainQueue.sync { scrollSequence = TouchScrollSequence() }
 
         SharedState.shared.trackpadScrollPassthrough = false
         SharedState.shared.trackpadMomentumEligibleUntil = -1e9
@@ -149,11 +196,37 @@ final class TrackpadModeController: ObservableObject {
         drainTimer?.cancel()
         drainTimer = nil
         trackedID = nil
+        cursorAcceleration.reset()
+        _ = tapDrag.cancel()
+        pendingDragDX = 0
+        pendingDragDY = 0
+        twoFingerTap.cancel()
+        suppressSingleUntilAllReleased = false
         SharedState.shared.trackpadScrollPassthrough = false
         SharedState.shared.trackpadMomentumEligibleUntil = -1e9
         SharedState.shared.trackpadScrollOwner = 0
         SharedState.shared.fingerCount = 0
         SharedState.shared.trackpadModeActive = false
+        twoFingerScroll.reset()
+        suppressScrollUntilAllReleased = false
+        os_unfair_lock_lock(&accLock)
+        accScrollX = 0
+        accScrollY = 0
+        accScrollGestureActive = false
+        accDX = 0
+        accDY = 0
+        accClickPending = false
+        accClickCount = 1
+        accRightClickPending = false
+        accDragDownPending = false
+        accDragUpPending = false
+        os_unfair_lock_unlock(&accLock)
+
+        // Close the scroll phase and release held buttons on normal teardown.
+        drainQueue.sync {
+            postScrollPackets(scrollSequence.consume(x: 0, y: 0, active: false))
+            releaseDragButtonIfNeeded()
+        }
 
         MMTLog.log("[診断] TrackpadMode: 無効化")
         TrackpadModeHUD.flash(active: false)
@@ -167,8 +240,36 @@ final class TrackpadModeController: ObservableObject {
         touchPathLength = 0
         touchMaxVelocity = 0
         touchFrameCount = 0
+        cursorAcceleration.reset()
+        _ = tapDrag.cancel()
+        pendingDragDX = 0
+        pendingDragDY = 0
+        twoFingerTap.cancel()
+        suppressSingleUntilAllReleased = false
         lastThreeFingerToggleTapAt = -1e9
         resetThreeFingerTracking()
+    }
+
+    private func cancelTapDrag() {
+        let needsMouseUp = tapDrag.cancel()
+        pendingDragDX = 0
+        pendingDragDY = 0
+        if needsMouseUp {
+            os_unfair_lock_lock(&accLock)
+            if accDragDownPending {
+                // The drain queue has not pressed yet; discard the drag entirely.
+                accDragDownPending = false
+                accDX = 0
+                accDY = 0
+            } else {
+                accDragUpPending = true
+            }
+            os_unfair_lock_unlock(&accLock)
+        }
+    }
+
+    func stopForTermination() {
+        if isActive { deactivate() }
     }
 
     private func resetThreeFingerTracking() {
@@ -186,12 +287,14 @@ final class TrackpadModeController: ObservableObject {
         // モード中は TouchGestureManager が早期returnするため、指本数と時刻をここで共有する。
         var touchingCount = 0
         var firstTouch: MTTouch?
+        var secondTouch: MTTouch?
         var positionSumX: Float = 0
         var positionSumY: Float = 0
         var maxVelocity: Double = 0
         for touch in touches where touch.state == 4 {
             touchingCount += 1
             if firstTouch == nil { firstTouch = touch }
+            else if secondTouch == nil { secondTouch = touch }
             positionSumX += touch.normalized.position.x
             positionSumY += touch.normalized.position.y
             let velocity = touch.normalized.velocity
@@ -202,9 +305,45 @@ final class TrackpadModeController: ObservableObject {
         SharedState.shared.fingerCount = touchingCount
         SharedState.shared.lastFrameAt = timestamp
 
+        let orientation = TrackpadModeOrientation(rawValue: settings.trackpadModeOrientation) ?? .upright
+        if orientation != scrollOrientation {
+            twoFingerScroll.reset()
+            scrollOrientation = orientation
+            os_unfair_lock_lock(&accLock)
+            accScrollX = 0; accScrollY = 0
+            os_unfair_lock_unlock(&accLock)
+        }
+        let firstContact = firstTouch.map {
+            TwoFingerScrollTracker.Contact(id: $0.identifier,
+                x: Double($0.normalized.position.x), y: Double($0.normalized.position.y))
+        }
+        let secondContact = secondTouch.map {
+            TwoFingerScrollTracker.Contact(id: $0.identifier,
+                x: Double($0.normalized.position.x), y: Double($0.normalized.position.y))
+        }
+        if touchingCount == 0 { suppressScrollUntilAllReleased = false }
+        else if touchingCount > 2 { suppressScrollUntilAllReleased = true }
+        let translation: (x: Double, y: Double)
+        if orientation == .upright || suppressScrollUntilAllReleased || threeFingerTracking {
+            twoFingerScroll.reset()
+            translation = (0, 0)
+        } else {
+            translation = twoFingerScroll.update(count: touchingCount, first: firstContact,
+                                                  second: secondContact, at: timestamp)
+        }
+        let scroll = orientation.scrollDelta(contactDX: translation.x,
+                                              contactDY: translation.y, gain: twoFingerScrollGain)
+        os_unfair_lock_lock(&accLock)
+        accScrollX += settings.verticalScrollOnly ? 0 : scroll.x
+        accScrollY += scroll.y
+        accScrollGestureActive = twoFingerScroll.isScrolling
+        os_unfair_lock_unlock(&accLock)
+
         if touchingCount >= 3,
            settings.threeFingerTapEnabled,
            settings.threeFingerTapAction.isTrackpadToggle {
+            twoFingerTap.cancel()
+            suppressSingleUntilAllReleased = true
             let centroid = MTPoint(
                 x: positionSumX / Float(touchingCount),
                 y: positionSumY / Float(touchingCount))
@@ -226,6 +365,8 @@ final class TrackpadModeController: ObservableObject {
             }
 
             trackedID = nil
+            cursorAcceleration.reset()
+            cancelTapDrag()
             os_unfair_lock_lock(&accLock)
             accDX = 0
             accDY = 0
@@ -258,17 +399,76 @@ final class TrackpadModeController: ObservableObject {
                 } else {
                     lastThreeFingerToggleTapAt = -1e9
                 }
+                suppressSingleUntilAllReleased = false
             }
+            return
+        }
+
+        // A multi-finger contact must never become a one-finger left tap while
+        // the fingers are being lifted one after another.
+        if touchingCount > 2 {
+            twoFingerTap.cancel()
+            suppressSingleUntilAllReleased = true
+            trackedID = nil
+            cursorAcceleration.reset()
+            cancelTapDrag()
             return
         }
 
         // 2本以上ではカーソル・タップ追跡を中断し、未ドレインの移動量も破棄する。
         if touchingCount >= 2 {
+            if SharedState.shared.buttonDown {
+                twoFingerTap.cancel()
+            } else if let first = firstTouch, let second = secondTouch {
+                let firstPos = first.normalized.position
+                let secondPos = second.normalized.position
+                if twoFingerTap.isTracking {
+                    twoFingerTap.update(
+                        firstID: first.identifier, firstX: Double(firstPos.x), firstY: Double(firstPos.y),
+                        secondID: second.identifier, secondX: Double(secondPos.x), secondY: Double(secondPos.y))
+                } else if !suppressSingleUntilAllReleased &&
+                            (trackedID == nil ||
+                             ((trackedID == first.identifier || trackedID == second.identifier) &&
+                              timestamp - touchStartTime <= settings.twoFingerSyncWindow)) {
+                    twoFingerTap.begin(
+                        firstID: first.identifier, firstX: Double(firstPos.x), firstY: Double(firstPos.y),
+                        secondID: second.identifier, secondX: Double(secondPos.x), secondY: Double(secondPos.y),
+                        at: timestamp)
+                }
+            }
+            suppressSingleUntilAllReleased = true
+            if twoFingerScroll.isScrolling { twoFingerTap.cancel() }
             trackedID = nil
+            cursorAcceleration.reset()
+            cancelTapDrag()
             os_unfair_lock_lock(&accLock)
             accDX = 0
             accDY = 0
             os_unfair_lock_unlock(&accLock)
+            return
+        }
+
+        if twoFingerTap.isTracking {
+            let isTap = twoFingerTap.finish(
+                at: timestamp, maxDuration: settings.tapMaxDuration,
+                minFrames: settings.tapMinFrames)
+            if isTap && !SharedState.shared.buttonDown
+                && timestamp - SharedState.shared.lastButtonUpAt > settings.buttonVetoWindow {
+                os_unfair_lock_lock(&accLock)
+                if settings.trackpadTapZones {
+                    if settings.twoFingerTapEnabled { accClickPending = true }
+                } else {
+                    accRightClickPending = true
+                }
+                os_unfair_lock_unlock(&accLock)
+            }
+        }
+
+        if suppressSingleUntilAllReleased {
+            trackedID = nil
+            cursorAcceleration.reset()
+            cancelTapDrag()
+            if touchingCount == 0 { suppressSingleUntilAllReleased = false }
             return
         }
 
@@ -279,6 +479,7 @@ final class TrackpadModeController: ObservableObject {
 
         if trackedID != touch.identifier {
             // 新規タッチ開始。デルタ0で基準位置だけ記録(いきなり跳ばないように)
+            if tapDrag.isDragging { cancelTapDrag() }
             trackedID = touch.identifier
             lastTouchPos = touch.normalized.position
             touchStartPos = touch.normalized.position
@@ -286,15 +487,30 @@ final class TrackpadModeController: ObservableObject {
             touchPathLength = 0
             touchMaxVelocity = 0
             touchFrameCount = 0
+            touchHadPhysicalButton = SharedState.shared.buttonDown
+            cursorAcceleration.reset(at: timestamp)
+            if settings.trackpadTapDragEnabled && !touchHadPhysicalButton {
+                _ = tapDrag.begin(at: timestamp)
+            } else {
+                _ = tapDrag.cancel()
+            }
+            pendingDragDX = 0
+            pendingDragDY = 0
             return
         }
 
         let ndx = Double(touch.normalized.position.x - lastTouchPos.x)
         let ndy = Double(touch.normalized.position.y - lastTouchPos.y)
-        let rawDX = ndx * settings.trackpadModeGain
+        let uprightDX = ndx * settings.trackpadModeGain
         // MTの正規化Yは前方(指を伸ばす先端側)が大きい。画面は上原点でYが下に増えるため、
         // 「前方へなぞる=カーソルが上へ動く」という直感に合わせて符号反転する(プロトタイプStep2確認済み)
-        let rawDY = -ndy * settings.trackpadModeGain
+        let uprightDY = -ndy * settings.trackpadModeGain
+        let (rawDX, rawDY) = orientation.cursorDelta(
+            x: uprightDX, y: uprightDY,
+            sidewaysAspectRatio: settings.trackpadSidewaysAspectRatio)
+        let acceleration = cursorAcceleration.multiplier(
+            contactDX: ndx, contactDY: ndy,
+            timestamp: timestamp, strength: settings.trackpadAccelerationStrength)
         lastTouchPos = touch.normalized.position
 
         touchPathLength += (ndx * ndx + ndy * ndy).squareRoot()
@@ -303,9 +519,33 @@ final class TrackpadModeController: ObservableObject {
         touchMaxVelocity = max(touchMaxVelocity, velocityMagnitude)
         touchFrameCount += 1
 
+        let cursorDX = rawDX * acceleration
+        let cursorDY = rawDY * acceleration
+        let physicalButtonHeld = SharedState.shared.buttonDown
+        touchHadPhysicalButton = touchHadPhysicalButton || physicalButtonHeld
+            || SharedState.shared.lastButtonUpAt >= touchStartTime
+        if !settings.trackpadTapDragEnabled || touchHadPhysicalButton {
+            cancelTapDrag()
+        }
+        if tapDrag.isCandidate {
+            pendingDragDX += cursorDX
+            pendingDragDY += cursorDY
+            if tapDrag.advance(contactDX: ndx, contactDY: ndy) {
+                os_unfair_lock_lock(&accLock)
+                accDragDownPending = true
+                accDX += pendingDragDX
+                accDY += pendingDragDY
+                os_unfair_lock_unlock(&accLock)
+                pendingDragDX = 0
+                pendingDragDY = 0
+            }
+            return
+        }
+
+        let movement = (x: cursorDX, y: cursorDY)
         os_unfair_lock_lock(&accLock)
-        accDX += rawDX
-        accDY += rawDY
+        accDX += movement.x
+        accDY += movement.y
         os_unfair_lock_unlock(&accLock)
     }
 
@@ -314,6 +554,21 @@ final class TrackpadModeController: ObservableObject {
     private func evaluateTapAndReset(endPos: MTPoint, endTime: Double, settings: SettingsSnapshot) {
         guard trackedID != nil else { return }
         trackedID = nil
+        cursorAcceleration.reset()
+        let wasSecondTap = tapDrag.isCandidate
+        let completedDrag = tapDrag.end()
+        pendingDragDX = 0
+        pendingDragDY = 0
+        if completedDrag {
+            os_unfair_lock_lock(&accLock)
+            accDragUpPending = true
+            os_unfair_lock_unlock(&accLock)
+            return
+        }
+
+        // A physical click must not also become a synthetic tap on finger lift.
+        guard !touchHadPhysicalButton, !SharedState.shared.buttonDown,
+              SharedState.shared.lastButtonUpAt < touchStartTime else { return }
 
         let dx = Double(endPos.x - touchStartPos.x)
         let dy = Double(endPos.y - touchStartPos.y)
@@ -327,9 +582,59 @@ final class TrackpadModeController: ObservableObject {
             && touchFrameCount >= settings.tapMinFrames
 
         if isTap {
+            let isRightTap = settings.trackpadTapZones
+                && Double(touchStartPos.x) >= settings.rightZoneMinX
             os_unfair_lock_lock(&accLock)
-            accClickPending = true
+            if isRightTap {
+                accRightClickPending = true
+            } else {
+                accClickPending = true
+                accClickCount = wasSecondTap ? 2 : 1
+            }
             os_unfair_lock_unlock(&accLock)
+            if !isRightTap && settings.trackpadTapDragEnabled {
+                tapDrag.arm(afterLeftTapAt: endTime)
+            }
+        }
+    }
+
+    /// Drain-queue only: keep the same synthetic signature as ordinary taps so
+    /// EventInterceptor does not treat the held button as a physical click.
+    private func postDragButton(_ type: CGEventType) -> Bool {
+        guard let src = moveEventSource,
+              let location = CGEvent(source: nil)?.location ?? lastDragLocation,
+              let event = CGEvent(mouseEventSource: src, mouseType: type,
+                                  mouseCursorPosition: location, mouseButton: .left) else {
+            return false
+        }
+        event.setIntegerValueField(.eventSourceUserData, value: SynthesizedClick.signature)
+        event.post(tap: .cghidEventTap)
+        lastDragLocation = location
+        return true
+    }
+
+    private func releaseDragButtonIfNeeded() {
+        guard dragButtonPosted else { return }
+        // A physical down has taken ownership; its real mouse-up will release.
+        if SharedState.shared.leftButtonDown || postDragButton(.leftMouseUp) {
+            dragButtonPosted = false
+            lastDragLocation = nil
+        }
+    }
+
+    private func postScrollPackets(_ packets: [TouchScrollSequence.Packet]) {
+        for packet in packets {
+            guard let event = CGEvent(scrollWheelEvent2Source: moveEventSource,
+                                      units: .pixel, wheelCount: 2,
+                                      wheel1: packet.y, wheel2: packet.x, wheel3: 0) else { continue }
+            event.setIntegerValueField(.eventSourceUserData, value: Self.scrollSignature)
+            event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            event.setIntegerValueField(.scrollWheelEventScrollPhase, value: packet.phase)
+            event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: 0)
+            // These are already pixel-based touch deltas, not physical wheel
+            // input. Post after HID filters so BTT's wheel smoothing does not
+            // swallow/re-amplify them (verified in the three-stage probe).
+            event.post(tap: .cgSessionEventTap)
         }
     }
 
@@ -338,13 +643,49 @@ final class TrackpadModeController: ObservableObject {
         os_unfair_lock_lock(&accLock)
         let dx = accDX
         let dy = accDY
+        let scrollX = accScrollX
+        let scrollY = accScrollY
+        let scrollGestureActive = accScrollGestureActive
         let clickPending = accClickPending
+        let clickCount = accClickCount
+        let rightClickPending = accRightClickPending
+        let dragDownPending = accDragDownPending
+        let dragUpPending = accDragUpPending
         let togglePending = accTogglePending
         accDX = 0
         accDY = 0
+        accScrollX = 0
+        accScrollY = 0
         accClickPending = false
+        accClickCount = 1
+        accRightClickPending = false
+        accDragDownPending = false
+        accDragUpPending = false
         accTogglePending = false
         os_unfair_lock_unlock(&accLock)
+
+        let settings = SettingsStore.shared.snapshot
+        let shared = SharedState.shared
+        let staleContact = CACurrentMediaTime() - shared.lastFrameAt > 0.3
+        if !settings.trackpadTapDragEnabled || staleContact || shared.buttonDown {
+            releaseDragButtonIfNeeded()
+        }
+
+        postScrollPackets(scrollSequence.consume(x: scrollX, y: scrollY,
+                                                   active: scrollGestureActive && !staleContact))
+
+        // The first tap's click must be posted before the second touch's
+        // mouse-down, even when both arrive within a single 120 Hz drain tick.
+        if clickPending {
+            SynthesizedClick.post(button: .left, clickCount: clickCount)
+        }
+        if rightClickPending {
+            SynthesizedClick.post(button: .right)
+        }
+        if dragDownPending && !dragButtonPosted && settings.trackpadTapDragEnabled
+            && !staleContact && !shared.buttonDown {
+            dragButtonPosted = postDragButton(.leftMouseDown)
+        }
 
         if dx != 0 || dy != 0 {
             if let current = CGEvent(source: nil)?.location {
@@ -354,19 +695,18 @@ final class TrackpadModeController: ObservableObject {
                 if let src = moveEventSource,
                    let move = CGEvent(
                         mouseEventSource: src,
-                        mouseType: .mouseMoved,
+                        mouseType: (dragButtonPosted || (settings.trackpadPressDragEnabled && shared.leftButtonDown))
+                            ? .leftMouseDragged : .mouseMoved,
                         mouseCursorPosition: resolved,
                         mouseButton: .left
                    ) {
                     move.setIntegerValueField(.eventSourceUserData, value: SynthesizedClick.signature)
                     move.post(tap: .cghidEventTap)
+                    if dragButtonPosted { lastDragLocation = resolved }
                 }
             }
         }
-
-        if clickPending {
-            SynthesizedClick.post(button: .left)
-        }
+        if dragUpPending { releaseDragButtonIfNeeded() }
 
         if togglePending {
             DispatchQueue.main.async { [weak self] in self?.toggle() }

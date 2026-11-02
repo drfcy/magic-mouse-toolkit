@@ -10,6 +10,8 @@
 	<string>Magic Mouse Toolkit</string>
 	<key>CFBundleExecutable</key>
 	<string>MagicMouseToolkit</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleVersion</key>
@@ -28,6 +30,7 @@
 	<array>
 		<string>ja</string>
 		<string>en</string>
+		<string>zh-Hans</string>
 	</array>
 </dict>
 </plist>

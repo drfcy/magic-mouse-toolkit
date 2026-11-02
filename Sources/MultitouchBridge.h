@@ -8,6 +8,7 @@
 #ifndef MultitouchBridge_h
 #define MultitouchBridge_h
 #include <CoreFoundation/CoreFoundation.h>
+typedef struct __CGEvent *CGEventRef;
 
 typedef struct { float x, y; } MTPoint;
 typedef struct { MTPoint position, velocity; } MTVector;
@@ -46,5 +47,10 @@ typedef struct __IOHIDEventSystemClient *IOHIDEventSystemClientRef;
 extern IOHIDEventSystemClientRef IOHIDEventSystemClientCreateSimpleClient(CFAllocatorRef allocator);
 extern void IOHIDEventSystemClientSetProperty(IOHIDEventSystemClientRef client, CFStringRef key, CFTypeRef property);
 extern CFTypeRef IOHIDEventSystemClientCopyProperty(IOHIDEventSystemClientRef client, CFStringRef key);
+
+// The sender ID of a scroll event is the registry ID of its HID service.
+// Use it to distinguish Magic Trackpad scrolling from Magic Mouse touching.
+CFTypeRef _Nullable CGEventCopyIOHIDEvent(CGEventRef event) CF_RETURNS_RETAINED;
+uint64_t IOHIDEventGetSenderID(CFTypeRef event);
 
 #endif

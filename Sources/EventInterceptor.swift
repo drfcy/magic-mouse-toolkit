@@ -4,6 +4,7 @@
 import CoreGraphics
 import QuartzCore
 import AppKit
+import IOKit
 
 /// CGEventTap の C コールバック（capture 不可のためグローバル関数）。
 private func eventInterceptorCallback(
@@ -20,8 +21,9 @@ private func eventInterceptorCallback(
 /// - 物理クリック監視（第4層ベトの情報源）
 /// - 2本指物理クリック→ミドルクリック変換
 ///
-/// コールバック規律: アロケーション・ログ・UserDefaults 読み取り禁止。
-/// SettingsSnapshot と共有状態の読み取り + 整数フィールド書き換えのみ。
+/// コールバック規律: ログ・UserDefaults 読み取り・IORegistry 探索禁止。
+/// 例外はスクロール・ジェスチャ・物理ボタンの送信元判別に必要な CGEventCopyIOHIDEvent のみ。
+/// デバイスIDは開始時と着脱時にキャッシュし、コールバック内では集合を読むだけ。
 ///
 /// 権限喪失の検知と復旧は本クラスの責務ではなく PermissionMonitor + AppDelegate が担う
 /// (SAFETY.md参照)。理由: `.tapDisabledByUserInput` はアクセシビリティ権限を
@@ -33,6 +35,10 @@ final class EventInterceptor {
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var trackpadScrollSenders: Set<UInt64> = []
+    private var magicMouseScrollSenders: Set<UInt64> = []
+    private var magicMouseButtonSenders: Set<UInt64> = []
+    private var convertedRightPressSender: UInt64?
 
     /// メニューバーの状態表示用
     var isRunning: Bool { eventTap != nil }
@@ -47,6 +53,7 @@ final class EventInterceptor {
 
     func start() {
         guard eventTap == nil else { return }
+        refreshMultitouchScrollSources()
 
         let eventsOfInterest: CGEventMask =
             (1 << CGEventType.leftMouseDown.rawValue)
@@ -54,6 +61,8 @@ final class EventInterceptor {
             | (1 << CGEventType.rightMouseDown.rawValue)
             | (1 << CGEventType.rightMouseUp.rawValue)
             | (1 << CGEventType.scrollWheel.rawValue)
+            | (1 << 29) // NSEventTypeGesture: Magic Mouse two-finger page swipe
+            | (1 << 31) // NSEventTypeSwipe
 
         guard let tap = CGEvent.tapCreate(
             tap: .cghidEventTap,
@@ -74,6 +83,45 @@ final class EventInterceptor {
         MMTLog.log("イベントタップ作成成功(クリック監視・ミドルクリック変換が有効)")
 
         updateEnabledState()
+    }
+
+    /// Resolve multitouch HID sender IDs outside the event-tap callback.
+    /// The device's driver class distinguishes trackpads from Magic Mice.
+    func refreshMultitouchScrollSources() {
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(
+            kIOMainPortDefault, IOServiceMatching("AppleMultitouchDevice"), &iterator
+        ) == KERN_SUCCESS else { return }
+        defer { IOObjectRelease(iterator) }
+
+        var trackpads: Set<UInt64> = []
+        var magicMice: Set<UInt64> = []
+        var magicButtons: Set<UInt64> = []
+        var service = IOIteratorNext(iterator)
+        while service != 0 {
+            var parent: io_registry_entry_t = 0
+            if IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent) == KERN_SUCCESS {
+                var senderID: UInt64 = 0
+                if IORegistryEntryGetRegistryEntryID(service, &senderID) == KERN_SUCCESS {
+                    if IOObjectConformsTo(parent, "AppleMultitouchTrackpadHIDEventDriver") != 0 {
+                        trackpads.insert(senderID)
+                    } else if IOObjectConformsTo(parent, "AppleMultitouchMouseHIDEventDriver") != 0 {
+                        magicMice.insert(senderID)
+                        magicButtons.insert(senderID)
+                        var driverID: UInt64 = 0
+                        if IORegistryEntryGetRegistryEntryID(parent, &driverID) == KERN_SUCCESS {
+                            magicButtons.insert(driverID)
+                        }
+                    }
+                }
+                IOObjectRelease(parent)
+            }
+            IOObjectRelease(service)
+            service = IOIteratorNext(iterator)
+        }
+        trackpadScrollSenders = trackpads
+        magicMouseScrollSenders = magicMice
+        magicMouseButtonSenders = magicButtons
     }
 
     /// タップを完全に破棄する。`tapEnable(false)` だけでなく `CFMachPortInvalidate` まで
@@ -97,6 +145,17 @@ final class EventInterceptor {
     /// 押下中・変換途中・スクロール受け渡し中の共有状態を初期化する。
     /// タップ無効化(updateEnabledState)・タップ破棄(stop)の両方から呼ぶ
     private func clearSharedInputState() {
+        // The matching physical up may arrive after the tap is disabled.
+        // Release our remapped left press before discarding its ownership.
+        if convertedRightPressSender != nil {
+            if let location = CGEvent(source: nil)?.location,
+               let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                                mouseCursorPosition: location, mouseButton: .left) {
+                up.setIntegerValueField(.eventSourceUserData, value: SynthesizedClick.signature)
+                up.post(tap: .cghidEventTap)
+            }
+            convertedRightPressSender = nil
+        }
         let shared = SharedState.shared
         shared.convertingToMiddle = false
         shared.leftButtonDown = false
@@ -109,6 +168,30 @@ final class EventInterceptor {
 
     @objc private func settingsChanged() {
         updateEnabledState()
+    }
+
+    /// Remap only this Magic Mouse's physical secondary press, retaining sender
+    /// ownership so its up is still paired if mode/options change while held.
+    private func remapTrackpadRightPress(type: CGEventType, event: CGEvent, senderID: UInt64?) -> Bool {
+        guard let senderID else { return false }
+        let shared = SharedState.shared
+        if type == .rightMouseDown {
+            let settings = SettingsStore.shared.snapshot
+            guard shared.trackpadModeActive, settings.trackpadPressDragEnabled,
+                  !settings.trackpadTapZones, magicMouseButtonSenders.contains(senderID) else { return false }
+            convertedRightPressSender = senderID
+            shared.leftButtonDown = true
+            event.type = .leftMouseDown
+        } else if type == .rightMouseUp, convertedRightPressSender == senderID {
+            convertedRightPressSender = nil
+            shared.leftButtonDown = false
+            shared.lastButtonUpAt = CACurrentMediaTime()
+            event.type = .leftMouseUp
+        } else {
+            return false
+        }
+        event.setIntegerValueField(.mouseEventButtonNumber, value: 0)
+        return true
     }
 
     /// master enable OFF 時は tap 自体を無効化する（タップ判定もベト先も不要なため）。
@@ -152,8 +235,52 @@ final class EventInterceptor {
         let shared = SharedState.shared
         let now = CACurrentMediaTime()
 
+        // A sideways two-finger stroke is recognized by macOS as the Magic
+        // Mouse's horizontal page gesture, often with no scrollWheel sequence
+        // at all. Raw contacts in TrackpadModeController supply the scroll.
+        // Suppress only this mouse's native gesture so it cannot move pages.
+        if (type.rawValue == 29 || type.rawValue == 31),
+           shared.trackpadModeActive,
+           SettingsStore.shared.trackpadModeOrientation != TrackpadModeOrientation.upright.rawValue,
+           let hidEvent = CGEventCopyIOHIDEvent(event),
+           magicMouseScrollSenders.contains(IOHIDEventGetSenderID(hidEvent)) {
+            return nil
+        }
+
         switch type {
         case .scrollWheel:
+            if event.getIntegerValueField(.eventSourceUserData) == TrackpadModeController.scrollSignature {
+                return Unmanaged.passUnretained(event)
+            }
+            // Another mouse's wheel can reach us twice: as a discrete hardware
+            // event and as a continuous event injected by BetterTouchTool's
+            // smooth scrolling. Neither belongs to the Magic Mouse touch sequence.
+            // On this system BetterTouchTool marks those injected events with
+            // userData 0x4D4D4741 and a nonzero source PID. Keep both paths out
+            // of the gesture state, while retaining native touch filtering.
+            if event.getIntegerValueField(.scrollWheelEventIsContinuous) == 0
+                || (event.getIntegerValueField(.eventSourceUnixProcessID) != 0
+                    && event.getIntegerValueField(.eventSourceUserData) == 0x4D4D4741) {
+                return Unmanaged.passUnretained(event)
+            }
+
+            // Native Magic Trackpad scrolling is continuous too. Its HID sender
+            // identifies the trackpad even when no finger-count frame is being
+            // monitored for this external device. Never treat it as Magic Mouse
+            // touch scrolling or alter its horizontal deltas and momentum state.
+            if shared.trackpadModeActive, let hidEvent = CGEventCopyIOHIDEvent(event) {
+                let senderID = IOHIDEventGetSenderID(hidEvent)
+                if trackpadScrollSenders.contains(senderID) {
+                    return Unmanaged.passUnretained(event)
+                }
+                if magicMouseScrollSenders.contains(senderID),
+                   SettingsStore.shared.trackpadModeOrientation != TrackpadModeOrientation.upright.rawValue {
+                    // Sideways mode synthesizes scrolling from the contacts.
+                    // Native horizontal scroll and momentum would double it.
+                    return nil
+                }
+            }
+
             if shared.trackpadModeActive {
                 // 直近フレームで2本指を確認できたスクロールと、その慣性列だけを通す。
                 // デルタ値には触れず、macOSが生成した高精度の減速カーブをそのまま維持する。
@@ -225,7 +352,8 @@ final class EventInterceptor {
                 return Unmanaged.passUnretained(event)
             }
             shared.leftButtonDown = true
-            if SettingsStore.shared.middleClickEnabled
+            if !shared.trackpadModeActive
+                && SettingsStore.shared.middleClickEnabled
                 && shared.fingerCount == 2
                 && (now - shared.lastFrameAt) < 0.08 {
                 shared.convertingToMiddle = true
@@ -251,11 +379,19 @@ final class EventInterceptor {
             if event.getIntegerValueField(.eventSourceUserData) == SynthesizedClick.signature {
                 return Unmanaged.passUnretained(event)
             }
+            let senderID = CGEventCopyIOHIDEvent(event).map { IOHIDEventGetSenderID($0) }
+            if remapTrackpadRightPress(type: type, event: event, senderID: senderID) {
+                return Unmanaged.passUnretained(event)
+            }
             shared.rightButtonDown = true
             return Unmanaged.passUnretained(event)
 
         case .rightMouseUp:
             if event.getIntegerValueField(.eventSourceUserData) == SynthesizedClick.signature {
+                return Unmanaged.passUnretained(event)
+            }
+            let senderID = CGEventCopyIOHIDEvent(event).map { IOHIDEventGetSenderID($0) }
+            if remapTrackpadRightPress(type: type, event: event, senderID: senderID) {
                 return Unmanaged.passUnretained(event)
             }
             shared.rightButtonDown = false

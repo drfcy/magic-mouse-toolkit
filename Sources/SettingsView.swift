@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 private func notifySettingsChanged() {
     NotificationCenter.default.post(name: .settingsChanged, object: nil)
@@ -11,12 +12,59 @@ extension View {
     }
 }
 
-/// フェーズ3（2026-07-10 Figmaプロトタイプ反映）設定画面。DS(DesignSystem)のトークンのみを使い、直値は書かない。
-/// メイン画面: 左=主要操作、右=タップ座標のライブ表示(常設)の2カラム。
-/// 詳細設定: 「詳細設定」ボタンで内部state切り替えにより遷移する別ページ(単カラム、戻るボタンつき)。
+/// 3本指タップに割り当てられる ActionKind の種別(設定UI用)。
+private enum BoundActionKind: String, CaseIterable, Identifiable {
+    case macro
+    case trackpadToggle
+    var id: String { rawValue }
+
+    var localizedTitle: String {
+        switch self {
+        case .macro: return NSLocalizedString("マクロ", comment: "3本指タップの割り当て種別")
+        case .trackpadToggle: return NSLocalizedString("トラックパッドモード切替", comment: "3本指タップの割り当て種別")
+        }
+    }
+}
+
+/// Window-local UI state. StateObject also builds with Command Line Tools
+/// installations that do not ship the SwiftUI StateMacro plugin.
+private final class SettingsTransientState: ObservableObject {
+    @Published var showDiagnostics = false
+    @Published var permissionGranted = false
+    @Published var deviceCount = 0
+    @Published var page: SettingsPage = .trackpad
+    @Published var recognitionExpanded = false
+    @Published var vetoExpanded = false
+    @Published var zoneExpanded = false
+    @Published var speedExpanded = false
+    @Published var diagnosticsExpanded = false
+    @Published var tap3ActionKind: BoundActionKind = AppSettings.shared.threeFingerTapAction.isTrackpadToggle ? .trackpadToggle : .macro
+    @Published var cachedTap3MacroAction: ActionKind = {
+        if case .macro = AppSettings.shared.threeFingerTapAction {
+            return AppSettings.shared.threeFingerTapAction
+        }
+        return .macro([])
+    }()
+}
+
+private enum SettingsPage: String, CaseIterable, Identifiable {
+    case common, trackpad, mouse, advanced
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .common: return NSLocalizedString("常用", comment: "Settings category")
+        case .trackpad: return NSLocalizedString("トラックパッドモード", comment: "Settings category")
+        case .mouse: return NSLocalizedString("鼠标模式", comment: "Settings category")
+        case .advanced: return NSLocalizedString("高级与诊断", comment: "Settings category")
+        }
+    }
+}
+
+/// Settings are grouped by task; navigation never changes the active input mode.
 struct SettingsView: View {
     // 一般
     @AppStorage(AppSettings.Key.enabled) private var enabled: Bool = true
+    @AppStorage(AppSettings.Key.startInTrackpadMode) private var startInTrackpadMode: Bool = true
 
     // ジェスチャー
     @AppStorage(AppSettings.Key.oneFingerTapEnabled) private var oneFingerTapEnabled: Bool = true
@@ -51,36 +99,19 @@ struct SettingsView: View {
 
     // 仮想トラックパッドモード
     @AppStorage(AppSettings.Key.trackpadModeGain) private var trackpadModeGain: Double = 1000.0
+    @AppStorage(AppSettings.Key.trackpadAccelerationStrength) private var trackpadAccelerationStrength: Double = 1.0
+    @AppStorage(AppSettings.Key.trackpadModeOrientation) private var trackpadModeOrientation: Int = 0
+    @AppStorage(AppSettings.Key.trackpadTapZones) private var trackpadTapZones: Bool = false
+    @AppStorage(AppSettings.Key.trackpadTapDragEnabled) private var trackpadTapDragEnabled: Bool = true
+    @AppStorage(AppSettings.Key.trackpadSidewaysAspectRatio) private var trackpadSidewaysAspectRatio: Double = 2.0
 
     @ObservedObject private var debugFeed = DebugFeed.shared
     @ObservedObject private var trackpadMode = TrackpadModeController.shared
-    @State private var showDetailSettings = false
-    @State private var zoneDetailExpanded = false
-
-    @State private var tap3ActionKind: BoundActionKind = AppSettings.shared.threeFingerTapAction.isTrackpadToggle ? .trackpadToggle : .macro
-    /// トラックパッドモード切替に切り替えた際、録画済みマクロを失わないためのセッション内キャッシュ(3本指用)。
-    @State private var cachedTap3MacroAction: ActionKind = {
-        if case .macro = AppSettings.shared.threeFingerTapAction {
-            return AppSettings.shared.threeFingerTapAction
-        }
-        return .macro([])
-    }()
-
-    /// 3本指タップに割り当てられる ActionKind の種別(設定UI用)。
-    private enum BoundActionKind: String, CaseIterable, Identifiable {
-        case macro
-        case trackpadToggle
-        var id: String { rawValue }
-
-        var localizedTitle: String {
-            switch self {
-            case .macro: return NSLocalizedString("マクロ", comment: "3本指タップの割り当て種別")
-            case .trackpadToggle: return NSLocalizedString("トラックパッドモード切替", comment: "3本指タップの割り当て種別")
-            }
-        }
-    }
+    @StateObject private var transient = SettingsTransientState()
 
     /// MacroRecorder のセッションラベル(保存先の確定と録画中の相互排他に使う)
+    private let statusTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
     private static let tap3MacroLabel = "tap3"
 
     private var tapMinFramesBinding: Binding<Double> {
@@ -106,389 +137,336 @@ struct SettingsView: View {
     private var frontDepthBinding: Binding<Double> {
         Binding(
             get: { 1.0 - zoneMinY },
-            set: { zoneMinY = 1.0 - $0 }
+            set: { zoneMinY = min(1.0 - $0, zoneMaxY) }
         )
     }
 
+    private func l(_ key: String) -> String { NSLocalizedString(key, comment: "Settings") }
+    private var leftBoundary: Binding<Double> {
+        Binding(get: { zoneMinX }, set: { zoneMinX = min($0, zoneMaxX) })
+    }
+    private var rightBoundary: Binding<Double> {
+        Binding(get: { zoneMaxX }, set: { zoneMaxX = max($0, zoneMinX) })
+    }
+    private var rearBoundary: Binding<Double> {
+        Binding(get: { zoneMinY }, set: { zoneMinY = min($0, zoneMaxY) })
+    }
+    private var frontBoundary: Binding<Double> {
+        Binding(get: { zoneMaxY }, set: { zoneMaxY = max($0, zoneMinY) })
+    }
+    private var liveDiagnosticsEnabled: Bool {
+        transient.page == .advanced && transient.diagnosticsExpanded && transient.showDiagnostics
+    }
+    private var modeBinding: Binding<Bool> {
+        Binding(get: { trackpadMode.isActive }, set: { value in
+            if value != trackpadMode.isActive { trackpadMode.toggle() }
+        })
+    }
+    private var diagnosticsBinding: Binding<Bool> {
+        Binding(get: { transient.showDiagnostics }, set: { value in
+            transient.showDiagnostics = value
+            debugFeed.isActive = value && transient.page == .advanced && transient.diagnosticsExpanded
+        })
+    }
+    private func refreshStatus() {
+        transient.permissionGranted = SharedState.shared.accessibilityGranted
+        transient.deviceCount = MultitouchDeviceManager.shared.activeDeviceCount
+    }
+
     var body: some View {
-        // タイトルバー・信号機ボタンは標準の.titledウィンドウ(GlassWindow.swift参照)に
-        // OSが自動適用する。ここではガラス背景を与えるだけ。
-        Group {
-            if showDetailSettings {
-                detailSettingsPage
-            } else {
-                mainPage
+        VStack(spacing: DS.Space.l) {
+            header
+            Picker("", selection: $transient.page) {
+                ForEach(SettingsPage.allCases) { Text($0.title).tag($0) }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, DS.Layout.contentLeading)
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.Space.l) {
+                    pageHeading
+                    switch transient.page {
+                    case .common: commonPage
+                    case .trackpad: trackpadPage
+                    case .mouse: mousePage
+                    case .advanced: advancedPage
+                    }
+                }
+                .padding(.horizontal, DS.Layout.contentLeading)
+                .padding(.bottom, DS.Space.xl)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .id(transient.page)
         }
-        // scroll edge effect(タイトルバー下ブラー)はタイトルバー領域に白帯を描くため
-        // 無効化(2026-07-07)。ヘッダーまで透けるガラスを優先する。
-        // GlassWindowのツールバー不使用とペアの設定(知見: liquid-glass-design-guideline)
+        .padding(.top, DS.Layout.contentTop)
+        .font(DS.Font.body)
         .scrollEdgeEffectHidden(true, for: .top)
         .frame(width: DS.Layout.windowSize.width, height: DS.Layout.windowSize.height)
-        // Figma node 4:179 の背景構造(2026-07-10確定): 全面ガラスではなく、
-        // ガラスは縁8pxのリムとしてだけ見え、その内側に白プレート(角丸はDS.Plate.radius)を敷く。
-        // プレートはタイトルバー領域の下まで届く(ignoresSafeArea)ため、
-        // 信号機・タイトルはプレートの上に重なって見える。
-        // プレートは白固定。フェードは縁からの距離ベース(2026-07-10改):
-        // 縁がわずかに透ける白ベース(plateBase)の上に、縁からplateFadeWidthだけ
-        // 引っ込めてblurした白コア(plateCore)を重ねる。中央はほぼ白(≈0.96)、
-        // ごく縁の近くだけ下のglassEffectのブラーがふわっと滲む(Figmaの質感)。
-        // 角丸はcontinuousでウィンドウ外側の角丸と同心にする(DS.Plate.radius参照)
         .background(
             ZStack {
-                SwiftUI.Color.clear
-                    .glassEffect(.regular, in: Rectangle())
+                SwiftUI.Color.clear.glassEffect(.regular, in: Rectangle())
                 RoundedRectangle(cornerRadius: DS.Plate.radius, style: .continuous)
                     .fill(DS.Color.plateBase)
                     .overlay(
                         RoundedRectangle(cornerRadius: DS.Plate.radius, style: .continuous)
-                            .fill(DS.Color.plateCore)
-                            .blur(radius: DS.Plate.fadeBlur)
+                            .fill(DS.Color.plateCore).blur(radius: DS.Plate.fadeBlur)
                             .padding(DS.Plate.fadeWidth)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: DS.Plate.radius, style: .continuous))
                     .padding(DS.Plate.inset)
-            }
-            .ignoresSafeArea()
+            }.ignoresSafeArea()
         )
-        // ライブ表示は常時表示化(2026-07-10)にともない、トグルではなくウィンドウの
-        // 表示/非表示に連動させる(ページを問わず、開いている間は常にフィード購読)。
-        .onAppear { debugFeed.isActive = true }
+        .onAppear { refreshStatus(); debugFeed.isActive = liveDiagnosticsEnabled }
         .onDisappear { debugFeed.isActive = false }
-    }
-
-    // MARK: - メイン画面(2カラム: 左=フラット行の主要操作 / 右=ライブ表示カード常設)
-    // Figma node 4:179: Form/Sectionは使わず、白プレートの上に直接置くフラット構成。
-    // セクションヘッダー・行背景・グループ枠・説明キャプションは置かない。
-
-    // HStack の spacing は隣接ペアすべてに入るため、末尾に Spacer を置くと columnGap が
-    // 2回分(44×2)効いて 328+44+264+44=680 > 636(=700-32-32) になり、はみ出した HStack が
-    // 中央寄せされて左右余白が非対称になる(左≈18/右≈62)。子は2つだけに保つこと(2026-07-27)。
-    private var mainPage: some View {
-        HStack(alignment: .top, spacing: DS.Layout.columnGap) {
-            leftColumn
-                .frame(width: DS.Layout.mainColumnWidth, alignment: .topLeading)
-            liveDisplayPanel
+        .onChange(of: liveDiagnosticsEnabled) { _, value in debugFeed.isActive = value }
+        .onReceive(statusTimer) { _ in if transient.page == .common { refreshStatus() } }
+        .onChange(of: transient.tap3ActionKind) { _, kind in
+            if kind == .trackpadToggle {
+                if case .macro = AppSettings.shared.threeFingerTapAction {
+                    transient.cachedTap3MacroAction = AppSettings.shared.threeFingerTapAction
+                }
+                AppSettings.shared.threeFingerTapAction = .toggleTrackpadMode
+            } else {
+                AppSettings.shared.threeFingerTapAction = transient.cachedTap3MacroAction
+            }
         }
-        .padding(.leading, DS.Layout.contentLeading)
-        .padding(.trailing, DS.Layout.contentTrailing)
-        .padding(.top, DS.Layout.contentTop)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var leftColumn: some View {
-        VStack(alignment: .leading, spacing: DS.Space.s) {
-            toggleRow(NSLocalizedString("有効にする", comment: "メイン設定トグル"), isOn: $enabled)
-                .notifyOnChange(of: enabled)
-            toggleRow(NSLocalizedString("1本指タップで左/右クリック", comment: "メイン設定トグル"), isOn: $oneFingerTapEnabled)
-                .notifyOnChange(of: oneFingerTapEnabled)
-            toggleRow(NSLocalizedString("タップは常に左クリック(右クリックは物理クリックのみ)", comment: "メイン設定トグル"), isOn: $tapAlwaysLeftClick)
-                .notifyOnChange(of: tapAlwaysLeftClick)
-            toggleRow(NSLocalizedString("2本指タップで左クリック", comment: "メイン設定トグル"), isOn: $twoFingerTapEnabled)
-                .notifyOnChange(of: twoFingerTapEnabled)
-            toggleRow(NSLocalizedString("2本指クリックでミドルクリック", comment: "メイン設定トグル"), isOn: $middleClickEnabled)
-                .notifyOnChange(of: middleClickEnabled)
-            toggleRow(NSLocalizedString("縦方向のみにスクロール(横スクロール無効)", comment: "メイン設定トグル"), isOn: $verticalScrollOnly)
-                .notifyOnChange(of: verticalScrollOnly)
+    private var header: some View {
+        HStack(spacing: DS.Space.m) {
+            Image(nsImage: NSImage(named: "AppIcon") ?? NSApp.applicationIconImage)
+                .resizable().interpolation(.high)
+                .frame(width: DS.Layout.settingsIconSide, height: DS.Layout.settingsIconSide)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            Text("Magic Mouse Toolkit").font(DS.Font.settingsTitle)
+            Spacer()
+            Text(!enabled ? l("已暂停") : l("当前模式") + "：" + (trackpadMode.isActive ? l("トラックパッドモード") : l("鼠标模式")))
+                .font(DS.Font.caption).foregroundStyle(DS.Color.labelSecondary)
+        }
+        .padding(.horizontal, DS.Layout.contentLeading)
+    }
 
-            if !tapAlwaysLeftClick {
-                HStack(spacing: DS.Space.s) {
-                    // ラベルはSliderに押されて省略(…)されやすいため全文表示を優先する
-                    rowLabel(NSLocalizedString("右クリックの開始位置", comment: "メイン設定ラベル"))
-                        .fixedSize()
-                        .layoutPriority(1)
-                    Slider(value: $rightZoneMinX, in: 0...1)
-                        .controlSize(.small)
-                    Text(String(format: NSLocalizedString("左から%.0f%%", comment: "座標(%)"), rightZoneMinX * 100))
-                        .font(DS.Font.value)
-                        .foregroundColor(DS.Color.labelSecondary)
-                }
-                .frame(height: DS.Layout.rowHeight)
-                .notifyOnChange(of: rightZoneMinX)
+    private var pageHeading: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(transient.page.title).font(DS.Font.settingsTitle)
+            Spacer()
+            if transient.page == .trackpad || transient.page == .mouse {
+                let isCurrent = enabled && (transient.page == .trackpad ? trackpadMode.isActive : !trackpadMode.isActive)
+                caption(isCurrent ? "当前正在使用" : "当前未启用，可预先调整")
             }
+        }
+    }
 
-            // ボタンの文法は .bordered 1本に統一し、階層は controlSize だけで表す(2026-07-27)。
-            // 「詳細設定」はページ遷移という主要アクションなので regular、録画/クリア等の
-            // 副次アクションと周囲のトグル行は small に揃える(.borderedProminent は使わない)。
-            HStack {
-                Spacer()
-                Button(NSLocalizedString("詳細設定", comment: "詳細設定ページへの遷移ボタン")) {
-                    showDetailSettings = true
+    private func caption(_ key: String) -> some View {
+        Text(l(key)).font(DS.Font.caption).foregroundStyle(DS.Color.labelSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            Text(l(title)).font(DS.Font.sectionHeader).foregroundStyle(DS.Color.labelSecondary)
+            content()
+        }
+    }
+    private func row<Control: View>(_ title: String, detail: String? = nil, @ViewBuilder control: () -> Control) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: DS.Space.l) {
+                VStack(alignment: .leading, spacing: DS.Space.xs) {
+                    Text(l(title)).fixedSize(horizontal: false, vertical: true)
+                    if let detail { caption(detail) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                control()
+            }.padding(.vertical, DS.Space.m)
+            Divider()
+        }
+    }
+    private func toggle(_ title: String, detail: String? = nil, value: Binding<Bool>) -> some View {
+        row(title, detail: detail) {
+            Toggle(l(title), isOn: value).labelsHidden().toggleStyle(.switch)
+                .controlSize(.small).tint(DS.Color.accent)
+        }.notifyOnChange(of: value.wrappedValue)
+    }
+    private func slider(_ title: String, detail: String? = nil, value: Binding<Double>, range: ClosedRange<Double>, format: @escaping (Double) -> String) -> some View {
+        row(title, detail: detail) {
+            HStack(spacing: DS.Space.m) {
+                Slider(value: value, in: range).controlSize(.small).accessibilityLabel(l(title))
+                Text(format(value.wrappedValue)).font(DS.Font.value)
+                    .foregroundStyle(DS.Color.labelSecondary)
+                    .frame(width: DS.Layout.valueWidth, alignment: .trailing)
+            }.frame(width: DS.Layout.settingsControlWidth)
+        }.notifyOnChange(of: value.wrappedValue)
+    }
+    private func percent(_ title: String, value: Binding<Double>) -> some View {
+        slider(title, value: value, range: 0...1) { String(format: "%.0f%%", $0 * 100) }
+    }
+    private func resetButton(_ title: String, action: @escaping () -> Void) -> some View {
+        HStack { Spacer(); Button(l(title), action: action).buttonStyle(.bordered).controlSize(.small) }
+            .padding(.top, DS.Space.s)
+    }
+
+    private var commonPage: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xl) {
+            group("使用状态") {
+                toggle("启用鼠标增强", value: $enabled)
+                row("使用模式", detail: "鼠标模式保留原生移动；触控板模式用手指滑动控制光标。") {
+                    Picker(l("使用模式"), selection: modeBinding) {
+                        Text(l("鼠标")).tag(false)
+                        Text(l("触控板")).tag(true)
+                    }.labelsHidden().pickerStyle(.segmented)
+                        .frame(width: DS.Layout.sliderLabelWidth).disabled(!enabled || !transient.permissionGranted)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-            }
-
-            toggleRow(
-                tap3ActionKind == .trackpadToggle
-                    ? NSLocalizedString("3本指ダブルタップで実行", comment: "メイン設定トグル")
-                    : NSLocalizedString("3本指タップで実行", comment: "メイン設定トグル"),
-                isOn: $threeFingerTapEnabled)
-                .notifyOnChange(of: threeFingerTapEnabled)
-                .padding(.top, DS.Space.l)
-
-            Picker(NSLocalizedString("割り当て", comment: "3本指タップの割り当て選択"), selection: $tap3ActionKind) {
-                ForEach(BoundActionKind.allCases) { kind in
-                    Text(kind.localizedTitle).tag(kind)
+                toggle("起動時にトラックパッドモードを有効化", detail: "应用启动且权限就绪后自动开启；手动切换模式不受影响。", value: $startInTrackpadMode)
+                row("设备") {
+                    Text(transient.deviceCount > 0 ? "Magic Mouse" : l("未检测到妙控鼠标"))
+                        .foregroundStyle(DS.Color.labelSecondary)
                 }
-            }
-            .pickerStyle(.segmented)
-            // 周囲のトグル行(すべて .small)と同じリズムに揃える。ここは「詳細設定」より
-            // 下位の設定なので、サイズでもそう見せる
-            .controlSize(.small)
-            .onChange(of: tap3ActionKind) { _, newValue in
-                switch newValue {
-                case .trackpadToggle:
-                    if case .macro = AppSettings.shared.threeFingerTapAction {
-                        cachedTap3MacroAction = AppSettings.shared.threeFingerTapAction
+                row("辅助功能权限") {
+                    if transient.permissionGranted { Text(l("已授权")).foregroundStyle(DS.Color.labelSecondary) }
+                    else {
+                        Button(l("打开权限设置…")) {
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                        }.buttonStyle(.bordered).controlSize(.small)
                     }
-                    AppSettings.shared.threeFingerTapAction = .toggleTrackpadMode
-                case .macro:
-                    AppSettings.shared.threeFingerTapAction = cachedTap3MacroAction
                 }
             }
+            group("共用操作") {
+                row("滚动方向", detail: "鼠标模式与触控板模式共用。") {
+                    Picker(l("滚动方向"), selection: $verticalScrollOnly) {
+                        Text(l("上下与左右")).tag(false)
+                        Text(l("仅上下")).tag(true)
+                    }.labelsHidden().frame(width: DS.Layout.settingsControlWidth)
+                }.notifyOnChange(of: verticalScrollOnly)
+                toggle("三指快捷操作", value: $threeFingerTapEnabled)
+                if threeFingerTapEnabled { macroSettings }
+                caption("菜单栏保留触控板模式快捷开关。")
+            }
+        }
+    }
 
-            if tap3ActionKind == .macro {
+    private var macroSettings: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            row("操作") {
+                Picker(l("操作"), selection: $transient.tap3ActionKind) {
+                    Text(l("双击切换使用模式")).tag(BoundActionKind.trackpadToggle)
+                    Text(l("轻点执行按键宏")).tag(BoundActionKind.macro)
+                }.labelsHidden().frame(width: DS.Layout.settingsControlWidth)
+            }
+            if transient.tap3ActionKind == .macro {
                 HStack(spacing: DS.Space.s) {
-                    Button(isRecordingTap3Macro
-                           ? NSLocalizedString("録画を停止して保存", comment: "マクロ録画ボタン")
-                           : NSLocalizedString("録画を開始", comment: "マクロ録画ボタン")) {
-                        if isRecordingTap3Macro {
-                            macroRecorder.stop()
-                        } else {
+                    Text(isRecordingTap3Macro ? String(format: l("録画中… %dイベント"), macroRecorder.recordedEvents.count) : String(format: l("登録済み：%dイベント"), savedMacroEventCount))
+                        .font(DS.Font.caption).foregroundStyle(DS.Color.labelSecondary)
+                    Spacer()
+                    Button(isRecordingTap3Macro ? l("録画を停止して保存") : l("録画を開始")) {
+                        if isRecordingTap3Macro { macroRecorder.stop() }
+                        else {
                             macroRecorder.start(label: Self.tap3MacroLabel) { events in
                                 AppSettings.shared.threeFingerTapAction = .macro(events)
                             }
                         }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    // 別の録画セッションが動作中の場合は開始しない(保存先の混線防止)
-                    .disabled(macroRecorder.isRecording && !isRecordingTap3Macro)
-                    Button(NSLocalizedString("クリア", comment: "マクロクリアボタン")) {
+                    }.disabled(macroRecorder.isRecording && !isRecordingTap3Macro)
+                    Button(l("クリア")) {
                         macroRecorder.clear()
                         AppSettings.shared.threeFingerTapAction = .macro([])
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(macroRecorder.isRecording || savedMacroEventCount == 0)
-                }
-
-                Text(isRecordingTap3Macro
-                     ? String(format: NSLocalizedString("録画中… %dイベント", comment: "マクロ録画中の件数表示"), macroRecorder.recordedEvents.count)
-                     : String(format: NSLocalizedString("登録済み：%dイベント", comment: "マクロ登録済み件数表示"), savedMacroEventCount))
-                    .font(DS.Font.caption)
-                    .foregroundColor(isRecordingTap3Macro ? DS.Color.debugFail : DS.Color.labelSecondary)
+                    }.disabled(macroRecorder.isRecording || savedMacroEventCount == 0)
+                }.buttonStyle(.bordered).controlSize(.small)
             }
         }
     }
 
-    /// メイン画面のフラット行ラベル。操作行のラベルは詳細設定のSliderRowと同じく
-    /// body(13pt)/labelPrimary に統一する(macOSの慣例。labelSecondaryはキャプションと数値表示に限定)。
-    private func rowLabel(_ text: String) -> Text {
-        Text(text)
-            .font(DS.Font.body)
-            .foregroundColor(DS.Color.labelPrimary)
-    }
-
-    /// 「ラベル左寄せ + スイッチ右端」のフラット行(行高 DS.Layout.rowHeight)。
-    private func toggleRow(_ label: String, isOn: Binding<Bool>) -> some View {
-        HStack {
-            rowLabel(label)
-            Spacer()
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .tint(DS.Color.accent)
-        }
-        .frame(height: DS.Layout.rowHeight)
-    }
-
-    /// 右カラム: 見出し + グレーカード(DS.Layout.liveCardSize固定・プレート内に収める)。
-    /// カード内は上部に指の本数/座標、直近イベント、判定内訳の順でScrollView表示。
-    private var liveDisplayPanel: some View {
-        VStack(alignment: .leading, spacing: DS.Space.m) {
-            Text(NSLocalizedString("タップ座標のライブ表示", comment: "ライブ表示カードの見出し"))
-                .font(DS.Font.sectionHeader)
-                .foregroundColor(DS.Color.labelSecondary)
-                .padding(.leading, DS.Space.m)
-
-            ScrollView {
-                debugContent
-                    .padding(DS.Space.m)
+    private var trackpadPage: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xl) {
+            group("光标移动") {
+                slider("基础移动速度", detail: "控制慢速移动与精细瞄准时的光标距离。", value: $trackpadModeGain, range: 200...3000) { String(format: "%.0f", $0) }
+                slider("快速移动加速", detail: "快速连续滑动时提高倍率，减速后回到基础速度。0 表示关闭。", value: $trackpadAccelerationStrength, range: 0...2) { String(format: "%.1f", $0) }
             }
-            .scrollContentBackground(.hidden)
-            .frame(width: DS.Layout.liveCardSize.width, height: DS.Layout.liveCardSize.height)
-            .background(
-                RoundedRectangle(cornerRadius: DS.Radius.card)
-                    .fill(DS.Color.cardFill)
-            )
+            group("点击与拖动") {
+                row("点击方式") {
+                    Picker(l("点击方式"), selection: $trackpadTapZones) {
+                        Text(l("触控板式")).tag(false)
+                        Text(l("左右分区式")).tag(true)
+                    }.labelsHidden().frame(width: DS.Layout.settingsControlWidth)
+                }.notifyOnChange(of: trackpadTapZones)
+                caption(trackpadTapZones ? "单指轻点按左右区域区分；双指轻点为左键。" : "单指轻点为左键；双指轻点为右键。")
+                if trackpadTapZones {
+                    percent("右键区域起点", value: $rightZoneMinX)
+                    toggle("2本指タップで左クリック", value: $twoFingerTapEnabled)
+                }
+                toggle("双轻点拖动", detail: "第二次轻触后不抬手，滑动即可拖动；抬手放下。", value: $trackpadTapDragEnabled)
+            }
+            group("摆放方向") {
+                row("鼠标摆放") {
+                    Picker(l("鼠标摆放"), selection: $trackpadModeOrientation) {
+                        Text(l("通常（先端が上）")).tag(0)
+                        Text(l("横置き（先端が右）")).tag(1)
+                        Text(l("横置き（先端が左）")).tag(2)
+                    }.labelsHidden().frame(width: DS.Layout.settingsControlWidth)
+                }.notifyOnChange(of: trackpadModeOrientation)
+                if trackpadModeOrientation != 0 {
+                    slider("横置光标横纵比例", detail: "轨迹偏瘦就调大，偏扁就调小。", value: $trackpadSidewaysAspectRatio, range: 0.5...3) { String(format: "%.2f", $0) }
+                }
+            }
+            resetButton("恢复此页默认设置") { AppSettings.shared.resetTrackpadToDefaults() }
         }
     }
 
-    // MARK: - 詳細設定ページ(単カラム、戻るボタンつき)
-
-    private var detailSettingsPage: some View {
-        VStack(spacing: 0) {
-            detailHeader
-            detailForm
+    private var mousePage: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xl) {
+            group("轻点点击") {
+                toggle("单指轻点点击", value: $oneFingerTapEnabled)
+                row("单指点击方式") {
+                    Picker(l("单指点击方式"), selection: $tapAlwaysLeftClick) {
+                        Text(l("按左右区域区分")).tag(false)
+                        Text(l("始终执行左键")).tag(true)
+                    }.labelsHidden().frame(width: DS.Layout.settingsControlWidth).disabled(!oneFingerTapEnabled)
+                }.notifyOnChange(of: tapAlwaysLeftClick)
+                if !tapAlwaysLeftClick { percent("右键区域起点", value: $rightZoneMinX) }
+                toggle("2本指タップで左クリック", value: $twoFingerTapEnabled)
+                toggle("2本指クリックでミドルクリック", value: $middleClickEnabled)
+            }
+            group("轻点响应范围") {
+                slider("前端响应范围", detail: "从鼠标头部向后，只在此范围内识别轻点。", value: frontDepthBinding, range: 0.05...1) { String(format: "%.0f%%", $0 * 100) }
+                caption("更细的触摸区域边界在高级与诊断中调整。")
+            }
+            resetButton("恢复此页默认设置") { AppSettings.shared.resetMouseToDefaults() }
         }
     }
 
-    private var detailHeader: some View {
-        HStack(spacing: DS.Space.s) {
-            Button {
-                showDetailSettings = false
-            } label: {
-                // アイコンはページ見出しと同格(13pt/semibold)に揃える
-                Image(systemName: "chevron.left")
-                    .font(DS.Font.pageTitle)
+    private var advancedPage: some View {
+        VStack(alignment: .leading, spacing: DS.Space.l) {
+            DisclosureGroup(l("轻点识别参数"), isExpanded: $transient.recognitionExpanded) {
+                slider("タップの最長時間", value: $tapMaxDuration, range: 0.05...0.5) { String(format: l("%.2f秒"), $0) }
+                slider("位置ズレの許容量", value: $tapMaxStraightDistance, range: 0.01...0.3) { String(format: "%.2f", $0) }
+                slider("動きの合計の許容量", value: $tapMaxPathLength, range: 0.01...0.3) { String(format: "%.2f", $0) }
+                slider("動きの速さの許容量", value: $tapMaxVelocity, range: 0.2...8) { String(format: "%.1f", $0) }
+                slider("最短の接触フレーム数", value: tapMinFramesBinding, range: 1...10) { String(format: "%.0f", $0) }
+                resetButton("恢复本组默认设置") { AppSettings.shared.resetSensitivityToDefaults() }
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Text(NSLocalizedString("詳細設定", comment: "詳細設定ページの見出し"))
-                .font(DS.Font.pageTitle)
-                .foregroundColor(DS.Color.labelPrimary)
-
-            Spacer()
-        }
-        // 下の Form(.grouped) のセクション見出し・行の実効インセット
-        // (DS.Layout.formBuiltInInset=30) は formInsetCompensation で contentLeading まで
-        // 押し出してあるので、ヘッダーも同じ値を使えば戻るボタンの枠の左端が
-        // セクション見出し・行ラベル・メイン画面の行ラベルと同じ 32pt に揃う
-        // (@2xキャプチャの画素実測で確認・2026-07-28)
-        .padding(.leading, DS.Layout.contentLeading)
-        .padding(.trailing, DS.Layout.contentTrailing)
-        // 上余白はメイン画面と同じ contentTop(8)。ページ種別ごとにトークンを分けず1本に統一
-        .padding(.top, DS.Layout.contentTop)
-        .padding(.bottom, DS.Space.xs)
+            Divider()
+            DisclosureGroup(l("誤反応の防止"), isExpanded: $transient.vetoExpanded) {
+                slider("スクロール後の待ち時間", value: $scrollVetoWindow, range: 0...1) { String(format: l("%.2f秒"), $0) }
+                slider("クリック後の待ち時間", value: $buttonVetoWindow, range: 0...0.5) { String(format: l("%.2f秒"), $0) }
+                slider("2本指の同時判定時間", value: $twoFingerSyncWindow, range: 0.02...0.2) { String(format: l("%.2f秒"), $0) }
+                resetButton("恢复本组默认设置") { AppSettings.shared.resetVetoToDefaults() }
+            }
+            Divider()
+            DisclosureGroup(l("鼠标模式 · 触摸区域边界"), isExpanded: $transient.zoneExpanded) {
+                percent("左右: 左端", value: leftBoundary)
+                percent("左右: 右端", value: rightBoundary)
+                percent("前後: 手前端", value: rearBoundary)
+                percent("前後: 先端", value: frontBoundary)
+                resetButton("恢复本组默认设置") { AppSettings.shared.resetZoneToDefaults() }
+            }
+            Divider()
+            DisclosureGroup(l("系统指针速度增强"), isExpanded: $transient.speedExpanded) {
+                slider("系统鼠标轨迹速度", detail: "影响系统鼠标速度；与手指控制光标的基础移动速度分开。", value: $pointerSpeedBoost, range: 0...9) { $0 <= 0 ? l("オフ") : String(format: "%.1f", $0) }
+            }
+            Divider()
+            DisclosureGroup(l("诊断信息"), isExpanded: $transient.diagnosticsExpanded) {
+                toggle("显示触点与轻点判定", value: diagnosticsBinding)
+                if transient.showDiagnostics { debugContent.padding(.vertical, DS.Space.m) }
+            }
+        }.padding(.top, DS.Space.s)
     }
 
-    private var detailForm: some View {
-        Form {
-            Section(header: sectionHeader(NSLocalizedString("タップに反応する範囲", comment: "詳細設定セクション見出し"))) {
-                // 値カラムは「数値+単位」だけに保つ(方向はラベルが持っている)。
-                // ローカライズ不要な純数値フォーマットにして、どの言語でも1行に収める(2026-07-28)
-                SliderRow(NSLocalizedString("先端側の反応範囲", comment: "詳細設定スライダーラベル"), value: frontDepthBinding, range: 0.05...1.0) {
-                    String(format: "%.0f%%", $0 * 100)
-                }
-                .notifyOnChange(of: zoneMinY)
-                caption(NSLocalizedString("マウス表面の先端(指先側)からこの割合までをタップに反応させます。初期値は25%です", comment: "詳細設定キャプション"))
-
-                Toggle(NSLocalizedString("詳細設定を表示", comment: "反応範囲の詳細表示トグル"), isOn: $zoneDetailExpanded)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .tint(DS.Color.accent)
-                if zoneDetailExpanded {
-                    SliderRow(NSLocalizedString("左右: 左端", comment: "詳細設定スライダーラベル"), value: $zoneMinX, range: 0...1) { String(format: "%.0f%%", $0 * 100) }
-                        .notifyOnChange(of: zoneMinX)
-                    SliderRow(NSLocalizedString("左右: 右端", comment: "詳細設定スライダーラベル"), value: $zoneMaxX, range: 0...1) { String(format: "%.0f%%", $0 * 100) }
-                        .notifyOnChange(of: zoneMaxX)
-                    SliderRow(NSLocalizedString("前後: 手前端", comment: "詳細設定スライダーラベル"), value: $zoneMinY, range: 0...1) { String(format: "%.0f%%", $0 * 100) }
-                        .notifyOnChange(of: zoneMinY)
-                    SliderRow(NSLocalizedString("前後: 先端", comment: "詳細設定スライダーラベル"), value: $zoneMaxY, range: 0...1) { String(format: "%.0f%%", $0 * 100) }
-                        .notifyOnChange(of: zoneMaxY)
-                    caption(NSLocalizedString("0%=左端・手前(手首側)、100%=右端・先端(指先側)。「前後: 手前端」は上の「先端側の反応範囲」と連動します", comment: "詳細設定キャプション"))
-                    Button(NSLocalizedString("反応範囲を初期設定に戻す", comment: "リセットボタン")) {
-                        AppSettings.shared.resetZoneToDefaults()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
-
-            Section(header: sectionHeader(NSLocalizedString("タップ判定のきびしさ", comment: "詳細設定セクション見出し"))) {
-                SliderRow(NSLocalizedString("タップの最長時間", comment: "詳細設定スライダーラベル"), value: $tapMaxDuration, range: 0.05...0.5) { String(format: NSLocalizedString("%.2f秒", comment: "秒数"), $0) }
-                    .notifyOnChange(of: tapMaxDuration)
-                SliderRow(NSLocalizedString("位置ズレの許容量", comment: "詳細設定スライダーラベル"), value: $tapMaxStraightDistance, range: 0.01...0.3) { String(format: "%.2f", $0) }
-                    .notifyOnChange(of: tapMaxStraightDistance)
-                SliderRow(NSLocalizedString("動きの合計の許容量", comment: "詳細設定スライダーラベル"), value: $tapMaxPathLength, range: 0.01...0.3) { String(format: "%.2f", $0) }
-                    .notifyOnChange(of: tapMaxPathLength)
-                SliderRow(NSLocalizedString("動きの速さの許容量", comment: "詳細設定スライダーラベル"), value: $tapMaxVelocity, range: 0.2...8.0) { String(format: "%.1f", $0) }
-                    .notifyOnChange(of: tapMaxVelocity)
-                SliderRow(NSLocalizedString("最短の接触フレーム数", comment: "詳細設定スライダーラベル"), value: tapMinFramesBinding, range: 1...10) { String(format: "%.0f", $0) }
-                    .notifyOnChange(of: tapMinFrames)
-                caption(NSLocalizedString("それぞれ右に動かすほど反応しやすくなります(最短接触フレーム数のみ左に動かすほど反応しやすい)。反応しやすいほどスクロールとの誤反応は増えます", comment: "詳細設定キャプション"))
-                Button(NSLocalizedString("タップ判定を初期設定に戻す", comment: "リセットボタン")) {
-                    AppSettings.shared.resetSensitivityToDefaults()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            Section(header: sectionHeader(NSLocalizedString("誤反応の防止", comment: "詳細設定セクション見出し"))) {
-                SliderRow(NSLocalizedString("スクロール後の待ち時間", comment: "詳細設定スライダーラベル"), value: $scrollVetoWindow, range: 0...1.0) { String(format: NSLocalizedString("%.2f秒", comment: "秒数"), $0) }
-                    .notifyOnChange(of: scrollVetoWindow)
-                SliderRow(NSLocalizedString("クリック後の待ち時間", comment: "詳細設定スライダーラベル"), value: $buttonVetoWindow, range: 0...0.5) { String(format: NSLocalizedString("%.2f秒", comment: "秒数"), $0) }
-                    .notifyOnChange(of: buttonVetoWindow)
-                SliderRow(NSLocalizedString("2本指の同時判定時間", comment: "詳細設定スライダーラベル"), value: $twoFingerSyncWindow, range: 0.02...0.2) { String(format: NSLocalizedString("%.2f秒", comment: "秒数"), $0) }
-                    .notifyOnChange(of: twoFingerSyncWindow)
-                caption(NSLocalizedString("スクロールや物理クリックの直後は、この時間だけタップを無視して誤クリックを防ぎます。2本指の同時判定時間は、2本の指のタッチ開始がこの時間内に収まったとき2本指タップとみなす設定です", comment: "詳細設定キャプション"))
-                Button(NSLocalizedString("誤反応の防止を初期設定に戻す", comment: "リセットボタン")) {
-                    AppSettings.shared.resetVetoToDefaults()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            Section(header: sectionHeader(NSLocalizedString("カーソル速度ブースト", comment: "詳細設定セクション見出し"))) {
-                SliderRow(NSLocalizedString("軌跡の速さ", comment: "詳細設定スライダーラベル"), value: $pointerSpeedBoost, range: 0...9.0) {
-                    $0 <= 0 ? NSLocalizedString("オフ", comment: "カーソル速度ブーストのオフ表示") : String(format: "x%.1f", $0)
-                }
-                .notifyOnChange(of: pointerSpeedBoost)
-                caption(NSLocalizedString("システム設定の上限(3.0)を超えてカーソルの軌跡速度を上げます。オフにする、またはアプリを終了すると元の速度に戻ります。システム設定の「マウス」を開くと一時的に上書きされることがあります", comment: "詳細設定キャプション"))
-            }
-
-            Section(header: sectionHeader(NSLocalizedString("トラックパッドモード", comment: "詳細設定セクション見出し"))) {
-                SliderRow(NSLocalizedString("移動ゲイン", comment: "詳細設定スライダーラベル"), value: $trackpadModeGain, range: 200...3000) { String(format: "%.0f", $0) }
-                    .notifyOnChange(of: trackpadModeGain)
-                caption(NSLocalizedString("マウス表面のなぞりをカーソル移動に変換する際の倍率です。3本指ダブルタップ、または下のボタンでモードのON/OFFを切り替えます", comment: "詳細設定キャプション"))
-                Button(trackpadMode.isActive
-                       ? NSLocalizedString("今すぐOFFにする", comment: "トラックパッドモード切替ボタン")
-                       : NSLocalizedString("今すぐONにする", comment: "トラックパッドモード切替ボタン")) {
-                    TrackpadModeController.shared.toggle()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            Section {
-                Button(NSLocalizedString("すべての設定を既定値に戻す", comment: "全設定リセットボタン")) {
-                    AppSettings.shared.resetAllToDefaults()
-                    // @AppStorageは自動追従するが、tap3ActionKindは@Stateのため
-                    // UserDefaultsの直接変更(removeObject)を検知できず取り残される
-                    tap3ActionKind = AppSettings.shared.threeFingerTapAction.isTrackpadToggle ? .trackpadToggle : .macro
-                    if case .macro = AppSettings.shared.threeFingerTapAction {
-                        cachedTap3MacroAction = AppSettings.shared.threeFingerTapAction
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-        }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        // Form(.grouped) のセクション見出しが持つ左右インセット(formBuiltInInset)を、
-        // メイン画面と同じ contentLeading/Trailing まで押し出す(Form の構造自体は変えない)
-        .padding(.horizontal, DS.Layout.formInsetCompensation)
-    }
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(DS.Font.sectionHeader)
-            .foregroundColor(DS.Color.labelSecondary)
-    }
-
-    private func caption(_ text: String) -> some View {
-        Text(text)
-            .font(DS.Font.caption)
-            .foregroundColor(DS.Color.labelSecondary)
-    }
-
-    /// ライブ表示カードの中身(11pt/secondary基調・値はmonospaced)。
-    /// 上部=指の本数(左)+座標(右)、中央=直近イベント、下部=判定内訳。
     private var debugContent: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             HStack {

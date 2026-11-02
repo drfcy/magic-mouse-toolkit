@@ -44,6 +44,7 @@ final class GlassWindow: NSWindow {
         window.contentViewController = hosting
         window.setContentSize(contentSize)
         window.title = title
+        window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
         // 背景は白プレート固定のため、ウィンドウ全体をライト外観に固定する

@@ -1,3 +1,178 @@
+[English](#english) | [简体中文](#简体中文)
+
+<a id="english"></a>
+
+# Magic Mouse Toolkit (Personal Edition)
+
+<p align="center">
+  <img src="docs/images/app-icon.png" width="180" alt="Magic Mouse Toolkit icon: a white Magic Mouse on a purple rounded background">
+</p>
+
+This macOS utility is based on [mori0818/Magic Mouse Toolkit](https://github.com/mori0818/magic-mouse-toolkit). This repository documents my personal edition, which explores using Apple Magic Mouse as a trackpad-like input surface for controlling a Mac.
+
+This project builds on and extends the original code while preserving its attribution, license, and third-party notices. It is not an official release by the original author. My changes are on the [`drfcy-custom-edition` branch](https://github.com/drfcy/magic-mouse-toolkit/tree/drfcy-custom-edition).
+
+## Download and installation
+
+**[Download Magic Mouse Toolkit Personal v1.0.0 (macOS)](https://github.com/drfcy/magic-mouse-toolkit/releases/download/v1.0.0/Magic-Mouse-Toolkit-Personal-v1.0.0-macOS.zip)** · [Release notes](https://github.com/drfcy/magic-mouse-toolkit/releases/tag/v1.0.0)
+
+- Requirements: macOS 26 or later, an Apple Silicon or Intel Mac, and Apple Magic Mouse.
+- Download and extract the ZIP, drag `Magic Mouse Toolkit.app` into Applications, and open it.
+- The app needs Accessibility permission for click synthesis and input processing. Follow the system prompts on first use.
+- This release is ad-hoc signed. It is not signed with an Apple Developer ID or notarized. macOS may warn that the developer cannot be verified. First confirm that the file came from this repository's Release, then follow the prompts in Privacy & Security to allow it to open.
+
+## Interface preview
+
+These screenshots show the app built from this branch. The screenshots use the Simplified Chinese interface; English and Japanese interfaces are also available.
+
+<p align="center">
+  <img src="docs/screenshots/settings-common.png" width="48%" alt="General settings: mode switching, enabling trackpad mode at launch, and scroll direction">
+  <img src="docs/screenshots/settings-trackpad.png" width="48%" alt="Trackpad mode settings: movement speed, acceleration, click style, and mouse orientation">
+</p>
+<p align="center"><sub>General (left) · Trackpad mode (right)</sub></p>
+
+<p align="center">
+  <img src="docs/screenshots/settings-mouse.png" width="48%" alt="Mouse mode settings: tapping, left and right click zones, and active touch area">
+  <img src="docs/screenshots/settings-advanced.png" width="48%" alt="Advanced and diagnostics: tap recognition, accidental input prevention, boundaries, pointer speed, and diagnostics">
+</p>
+<p align="center"><sub>Mouse mode (left) · Advanced and diagnostics (right)</sub></p>
+
+## Why I made this edition
+
+Magic Mouse has a multitouch surface that recognizes taps, swipes, and gestures involving multiple fingers. In my own use, its main difficulty as a conventional mouse has been precise pointing: changes in where my fingers contact the surface can affect the cursor, and even small changes can make it difficult to hit a small target accurately. Compared with conventional mice I have used, such as the Logitech GPW3 (Logitech G Pro X Superlight 2), I see Magic Mouse's strength in its touch surface and multifinger input rather than in replacing the pointing precision of a conventional mouse.
+
+This edition therefore explores a different use: **treating Magic Mouse as a trackpad-like touch surface.** Trackpad mode converts finger movement on the mouse surface into cursor movement, with settings for taps, click style, scroll direction, and sensitivity. Cursor gain and acceleration can also be adjusted to improve the feel of slow positioning and fast movement.
+
+### Full comparison of the two mice's measured specifications
+
+The table below compiles data from the RTINGS test screenshots I supplied. GPW3 refers here to the Logitech G Pro X Superlight 2.
+
+| Test metric | Apple Magic Mouse 2 | Logitech GPW3 (G Pro X Superlight 2) |
+| --- | ---: | ---: |
+| CPI score | 6.0 | **9.8** |
+| SRAV (speed-related accuracy variation) | +1.00% | **−0.04% (1600 CPI)** |
+| Precision error between speeds | 3.85% | **0.34%** |
+| Worst tracking error | −27.15% | **1.44%** |
+| CPI range | Fixed at 1300 | Adjustable, minimum 100 |
+| CPI adjustment increment | Not supported | 1 CPI |
+| Sensor latency score | 6.2 | **9.4** |
+| Mid-movement latency | 23.7 ms | **1.4 ms** |
+| Click latency score | 3.4 | **9.8** |
+| Wireless click latency | 44.4 ms (Bluetooth) | **1.5 ms (receiver)** |
+| Maximum wireless polling rate | Approximately 90 Hz (other tests) | **8000 Hz** |
+| Weight | Approximately 99 g | **Approximately 60 g** |
+| Connection | Bluetooth | LIGHTSPEED wireless receiver |
+
+Sources: [RTINGS Apple Magic Mouse 2 review](https://www.rtings.com/mouse/reviews/apple/magic-mouse-2?share_token=ZHQVeCAFp2EUqG71TACcUUSY-3oh335x); [RTINGS Logitech G Pro X Superlight 2 review](https://www.rtings.com/mouse/reviews/logitech/g-pro-x-superlight-2?share_token=jtg4JUMtqqbIA9gwXpGg-OLOhg6f5HtA). GPW3's 8000 Hz is its supported maximum polling rate; actual rates depend on device settings, receiver, and system environment. The approximately 90 Hz figure for Magic Mouse 2 comes from other tests and is not a fixed value applicable to every environment.
+
+The SRAV test settings differ: Magic Mouse 2 was tested at its fixed 1300 CPI, while the corresponding GPW3 result was measured at 1600 CPI. These figures help describe each mouse's consistency across speeds, but are not a laboratory comparison under identical settings. RTINGS results also do not directly represent the final cursor experience on macOS.
+
+### How these figures relate to imprecise pointing
+
+- **Movement feedback latency differs substantially.** Mid-movement latency is 23.7 ms for Magic Mouse 2 versus 1.4 ms for GPW3, approximately 17 times as high. This may make deceleration and fine adjustments near small targets feel less responsive.
+- **Tracking consistency across speeds differs.** Precision error between speeds is 3.85% for Magic Mouse 2 and 0.34% for GPW3, a numerical ratio of approximately 11.3. This describes consistency as speed changes; it does not mean that GPW3's practical pointing accuracy is 11.3 times better.
+- **Click feedback also differs substantially.** Wireless click latency is 44.4 ms versus 1.5 ms, a numerical ratio of approximately 30. This mainly affects response time. If the cursor has already stopped, this latency alone would not normally move the click to another position.
+- **Average tracking deviation and the worst result should be distinguished.** Magic Mouse 2's average tracking deviation is approximately −20%, with a relatively flat curve. A consistent proportional deviation can be compensated for by adjusting tracking speed. The −27.15% figure is the worst test result, not a typical error for every everyday movement. GPW3's worst tracking error is 1.44%, with a curve close to the 0% error line.
+
+These measurements show clear advantages for GPW3 in tracking consistency, movement response, and click response, which supports my motivation to repurpose Magic Mouse for trackpad-like input. However, imprecise pointing may also involve changes in finger contact area, macOS pointer acceleration, and movement of the mouse during a physical press. These RTINGS tests do not directly measure my complete interaction sequence, so the data describe hardware differences rather than prove a single cause.
+
+Two practical considerations also motivated this approach:
+
+- **Control a Mac without a desk.** Holding Magic Mouse in one hand allows cursor movement and taps, so it can serve as a simple handheld remote input device when sitting farther away from the Mac.
+- **Try trackpad-like input at a lower cost.** In my purchasing situation, Magic Mouse cost considerably less than Magic Trackpad. If you already have Magic Mouse, this approach also lets you experiment using existing hardware.
+
+These figures come from particular tests and materials I supplied. They do not replace comparisons under each user's own desk setup, system settings, and grip. The design motivation remains my personal judgment, not a claim about every user's experience or a claim that the software fully reproduces Apple Magic Trackpad's hardware, system behavior, or complete gesture set.
+
+## My setup
+
+The software is only one part of the setup. My intended workflow and actual configuration combine this app, BetterTouchTool (BTT), and my personal hardware arrangement:
+
+1. Enable Trackpad mode in this app to move the cursor by sliding a finger on Magic Mouse, and configure tapping and click style as needed.
+2. In BetterTouchTool, assign actions to Magic Mouse gestures such as two-finger zoom, three-finger left/right switching, and three-finger swipe up. Which gestures are recognized depends on the BTT configuration and input events currently available from macOS.
+3. To reduce sliding on a desk, I attach anti-slip pads to the bottom of the mouse. I also cover its optical sensor to prevent that sensor from continuing to move the cursor. These are personal hardware modifications, not software features or required steps for every user.
+
+This app mainly handles Magic Mouse touch input, cursor movement, taps, and related scrolling. BetterTouchTool handles user-configured system gestures and shortcuts. Conventional mice and trackpads can still be used in their usual ways. Some orientation-dependent behaviors, including scrolling with the mouse placed sideways, remain experimental; the setup should not be taken to implement all Magic Trackpad gestures completely.
+
+## Changes in this edition
+
+- Settings are organized into General, Trackpad mode, Mouse mode, and Advanced and diagnostics.
+- A Simplified Chinese interface has been added alongside English and Japanese.
+- Trackpad mode can be toggled directly from the menu bar and optionally enabled at launch.
+- Choose between trackpad-style taps (one finger for left click, two fingers for right click) and left/right click zones.
+- Cursor acceleration has been added, with separate adjustments for the base gain during slow movement and acceleration during fast movement.
+- Cursor direction and movement scaling can be adjusted when the mouse is placed sideways.
+- Settings cover tap recognition, scrolling, device detection, and diagnostics.
+
+This list describes settings and implementations present in this branch. It does not mean that the app itself implements BetterTouchTool's gestures or that every combination of orientation and device setup has been fully verified.
+
+## App icon
+
+The icon features a white Magic Mouse on a purple rounded background. The white mouse identifies the target device, while the rounded icon and purple background distinguish this personal edition. It represents the project's focus on touch input using the mouse surface; the icon itself does not imply any functionality.
+
+## Requirements
+
+- macOS 26 or later
+- Apple Magic Mouse
+- Xcode or a Swift toolchain containing the macOS 26 SDK to build
+- Accessibility permission for click synthesis, macros, and input mapping
+
+The app uses Apple's private `MultitouchSupport.framework` and IOKit interfaces. Updates may be needed after macOS changes, and it is not suitable for Mac App Store distribution.
+
+## Build and run
+
+Explicitly check out the personal-edition branch. This repository's `main` branch still follows the original project's mainline.
+
+```sh
+git clone --branch drfcy-custom-edition --single-branch https://github.com/drfcy/magic-mouse-toolkit.git
+cd magic-mouse-toolkit
+./build.sh
+open "build/Magic Mouse Toolkit.app"
+```
+
+The default is ad-hoc signing. To use your own signing identity, set `SIGN_ID`:
+
+```sh
+SIGN_ID="Developer ID Application: Your Name (TEAMID)" ./build.sh
+```
+
+Do not commit signing certificates or private keys. macOS may require permission to be granted again after a signing change. Quit the old version before changing permissions.
+
+## Privacy
+
+- The app itself contains no telemetry, analytics SDKs, or network transmission features.
+- Macro recording stores key codes, modifier flags, key-down state, and timing intervals in local UserDefaults. It does not store or transmit the text corresponding to keystrokes. Do not record while entering passwords or other secrets.
+- Diagnostic logs are stored at `~/Library/Logs/MagicMouseToolkit.log` and rotate at approximately 1 MiB. Logs may contain runtime information such as gesture decisions and coordinates.
+
+## Before use
+
+Do not disable or remove the app's Accessibility permission in System Settings while it is running. To change permissions, first quit normally from the menu bar, change the permission, and reopen the app. Changing permissions incorrectly may temporarily interrupt system input. See [SAFETY.md](./SAFETY.md) for details.
+
+The system pointer-speed boost temporarily changes the global `HIDMouseAcceleration` and restores it on normal exit. If speed is not restored after a force quit, first quit the app, then move the Tracking speed slider once in System Settings → Mouse.
+
+## Attribution and license
+
+This project is a modified derivative of [mori0818/Magic Mouse Toolkit](https://github.com/mori0818/magic-mouse-toolkit). The original project also documents third-party projects it drew on and their licenses. Preserve [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md), [LICENSE](./LICENSE), and the relevant copyright notices.
+
+This project is distributed under GNU GPL v3.0 only. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for third-party code provenance and licensing.
+
+## Other documentation
+
+- [SAFETY.md](./SAFETY.md): permission changes, input issues, and system mouse speed
+- [SPEC.md](./SPEC.md): functional specification
+- [ARCHITECTURE.md](./ARCHITECTURE.md): architecture and code provenance
+- [IMPLEMENTATION.md](./IMPLEMENTATION.md): implementation details
+- [DESIGN.md](./DESIGN.md): design system and UI tokens
+- [UI_DESIGN.md](./UI_DESIGN.md): UI design considerations
+- [docs/LOCALIZATION_PLAN.md](./docs/LOCALIZATION_PLAN.md): historical localization implementation plan
+- [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md): third-party code and licenses
+- [CONTRIBUTING.md](./CONTRIBUTING.md): contribution guidelines
+- [SECURITY.md](./SECURITY.md): reporting security issues
+- [prototypes/README.md](./prototypes/README.md): prototype experiments
+
+---
+
+<a id="简体中文"></a>
+
 # Magic Mouse Toolkit（个人修改版）
 
 <p align="center">
@@ -160,3 +335,7 @@ SIGN_ID="Developer ID Application: Your Name (TEAMID)" ./build.sh
 - [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)：第三方代码与许可证
 - [CONTRIBUTING.md](./CONTRIBUTING.md)：贡献指南
 - [SECURITY.md](./SECURITY.md)：安全问题反馈
+- [DESIGN.md](./DESIGN.md)：设计系统与界面令牌
+- [UI_DESIGN.md](./UI_DESIGN.md)：界面设计考量
+- [docs/LOCALIZATION_PLAN.md](./docs/LOCALIZATION_PLAN.md)：早期本地化实施计划
+- [prototypes/README.md](./prototypes/README.md)：原型验证代码

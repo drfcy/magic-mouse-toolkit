@@ -1,29 +1,29 @@
-name: Feature request
-description: Suggest an improvement to Magic Mouse Toolkit
+name: Feature request / 功能建议
+description: Suggest an improvement to Magic Mouse Toolkit / 为 Magic Mouse Toolkit 提出改进建议
 title: "[Feature] "
 labels: ["enhancement"]
 body:
   - type: textarea
     id: problem
     attributes:
-      label: Problem
-      description: What limitation or workflow problem should this solve?
+      label: Problem / 问题
+      description: What limitation or workflow problem should this solve? / 希望解决什么限制或使用流程问题？
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed behavior
+      label: Proposed behavior / 建议的行为
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives considered
+      label: Alternatives considered / 考虑过的替代方案
   - type: checkboxes
     id: input_scope
     attributes:
-      label: Input and privacy impact
+      label: Input and privacy impact / 对输入和隐私的影响
       options:
-        - label: This request explains whether it records, transforms, launches, or transmits user input.
+        - label: This request explains whether it records, transforms, launches, or transmits user input. / 本建议已说明是否涉及用户输入的记录、转换、触发执行或传输。
           required: true

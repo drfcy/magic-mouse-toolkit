@@ -1,5 +1,5 @@
-name: Bug report
-description: Report a reproducible problem with Magic Mouse Toolkit
+name: Bug report / 问题反馈
+description: Report a reproducible problem with Magic Mouse Toolkit / 反馈可复现的问题
 title: "[Bug] "
 labels: ["bug"]
 body:
@@ -7,50 +7,52 @@ body:
     attributes:
       value: |
         Before testing permission-related behavior, read `SAFETY.md`.
+        测试与权限有关的行为前，请先阅读 `SAFETY.md`。
         Do not toggle or reset Accessibility permissions while Magic Mouse Toolkit is running.
+        Magic Mouse Toolkit 运行时，请勿开关或重置辅助功能权限。
   - type: input
     id: macos
     attributes:
-      label: macOS version
+      label: macOS version / macOS 版本
       placeholder: "macOS 26.x"
     validations:
       required: true
   - type: input
     id: device
     attributes:
-      label: Magic Mouse model
+      label: Magic Mouse model / Magic Mouse 型号
       placeholder: "Magic Mouse 2 / USB-C Magic Mouse"
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
-      label: Steps to reproduce
-      description: List the smallest safe sequence that reproduces the problem.
+      label: Steps to reproduce / 复现步骤
+      description: List the smallest safe sequence that reproduces the problem. / 列出能够安全复现问题的最少步骤。
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected behavior
+      label: Expected behavior / 预期行为
     validations:
       required: true
   - type: textarea
     id: actual
     attributes:
-      label: Actual behavior
+      label: Actual behavior / 实际行为
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: Relevant logs
-      description: Remove personal information before pasting excerpts from MagicMouseToolkit.log.
+      label: Relevant logs / 相关日志
+      description: Remove personal information before pasting excerpts from MagicMouseToolkit.log. / 粘贴 MagicMouseToolkit.log 片段前，请移除个人信息。
       render: text
   - type: checkboxes
     id: safety
     attributes:
-      label: Safety confirmation
+      label: Safety confirmation / 安全确认
       options:
-        - label: I did not toggle, remove, or reset Accessibility permissions while Magic Mouse Toolkit was running.
+        - label: I did not toggle, remove, or reset Accessibility permissions while Magic Mouse Toolkit was running. / 我未在 Magic Mouse Toolkit 运行期间开关、移除或重置辅助功能权限。
           required: true

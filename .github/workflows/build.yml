@@ -1,9 +1,7 @@
 name: Build
 
+# Manual only: run this workflow from the Actions page when you choose.
 on:
-  push:
-    branches: [main, drfcy-custom-edition]
-  pull_request:
   workflow_dispatch:
 
 permissions:

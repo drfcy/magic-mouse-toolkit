@@ -62,6 +62,7 @@ final class AppSettings {
     enum Key {
         static let enabled = "mmt.enabled"
         static let startInTrackpadMode = "mmt.trackpad.startOnLaunch"
+        static let showMenuBarIcon = "mmt.menuBarIconVisible"
         static let oneFingerTapEnabled = "mmt.tap1.enabled"
         static let tapAlwaysLeftClick = "mmt.tap1.alwaysLeft"
         static let twoFingerTapEnabled = "mmt.tap2.enabled"
@@ -108,6 +109,7 @@ final class AppSettings {
     static let defaultValues: [String: Any] = [
         Key.enabled: true,
         Key.startInTrackpadMode: true,
+        Key.showMenuBarIcon: true,
         Key.oneFingerTapEnabled: true,
         Key.tapAlwaysLeftClick: false,
         Key.twoFingerTapEnabled: true,
@@ -166,6 +168,10 @@ final class AppSettings {
     var startInTrackpadMode: Bool {
         get { defaults.bool(forKey: Key.startInTrackpadMode) }
         set { defaults.set(newValue, forKey: Key.startInTrackpadMode); notifyChanged() }
+    }
+    var showMenuBarIcon: Bool {
+        get { defaults.bool(forKey: Key.showMenuBarIcon) }
+        set { defaults.set(newValue, forKey: Key.showMenuBarIcon); notifyChanged() }
     }
     var oneFingerTapEnabled: Bool {
         get { defaults.bool(forKey: Key.oneFingerTapEnabled) }

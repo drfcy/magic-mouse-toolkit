@@ -31,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 避けるため、ここで先に初期化しておく
         _ = SettingsStore.shared.snapshot
         setupMenuBar()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(settingsDidChange), name: .settingsChanged, object: nil)
 
         // タッチ監視はアクセシビリティ権限と無関係に動くため即起動する
         // （権限が無くてもライブ表示・タップ判定のデバッグができるように）
@@ -178,6 +180,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         item.menu = buildMenu()
         statusItem = item
+        item.isVisible = AppSettings.shared.showMenuBarIcon
+    }
+
+    @objc private func settingsDidChange() {
+        let updateVisibility: () -> Void = { [weak self] in
+            guard let self else { return }
+            self.statusItem?.isVisible = AppSettings.shared.showMenuBarIcon
+        }
+        if Thread.isMainThread {
+            updateVisibility()
+        } else {
+            DispatchQueue.main.async(execute: updateVisibility)
+        }
     }
 
     private func buildMenu() -> NSMenu {

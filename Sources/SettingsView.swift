@@ -65,6 +65,7 @@ struct SettingsView: View {
     // 一般
     @AppStorage(AppSettings.Key.enabled) private var enabled: Bool = true
     @AppStorage(AppSettings.Key.startInTrackpadMode) private var startInTrackpadMode: Bool = true
+    @AppStorage(AppSettings.Key.showMenuBarIcon) private var showMenuBarIcon: Bool = true
 
     // ジェスチャー
     @AppStorage(AppSettings.Key.oneFingerTapEnabled) private var oneFingerTapEnabled: Bool = true
@@ -315,6 +316,7 @@ struct SettingsView: View {
                         .frame(width: DS.Layout.sliderLabelWidth).disabled(!enabled || !transient.permissionGranted)
                 }
                 toggle("起動時にトラックパッドモードを有効化", detail: "应用启动且权限就绪后自动开启；手动切换模式不受影响。", value: $startInTrackpadMode)
+                toggle("メニューバーアイコンを表示", detail: "隐藏图标后，可从访达重新打开应用进入设置并恢复图标。", value: $showMenuBarIcon)
                 row("设备") {
                     Text(transient.deviceCount > 0 ? "Magic Mouse" : l("未检测到妙控鼠标"))
                         .foregroundStyle(DS.Color.labelSecondary)

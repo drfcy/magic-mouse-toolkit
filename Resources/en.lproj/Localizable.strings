@@ -373,6 +373,8 @@
 "横置きでは、マウス表面のなぞりとマウス自身のスクロール方向を画面に合わせて回転します。ほかのマウスとトラックパッドには影響しません" = "Sideways mode rotates cursor movement and Magic Mouse scrolling to match the screen. Other mice and Magic Trackpads are unaffected.";
 "カーソル加速度" = "Cursor Acceleration";
 "起動時にトラックパッドモードを有効化" = "Start in Trackpad Mode";
+"メニューバーアイコンを表示" = "Show menu bar icon";
+"隐藏图标后，可从访达重新打开应用进入设置并恢复图标。" = "After hiding the icon, reopen the app from Finder to access settings and restore it.";
 "タップしてからもう一度触れてドラッグ" = "Tap, then touch again to drag";
 "左ボタンを押しながらドラッグ" = "Press mouse to drag";
 "マウスの左ボタンを押したまま表面をなぞるとドラッグします。ボタンを離すとドロップします" = "Press anywhere on the Magic Mouse and hold, then move a finger to drag. Release the press to drop. With left/right zones enabled, use the left-click area.";

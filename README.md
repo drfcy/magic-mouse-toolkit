@@ -14,7 +14,7 @@ This project builds on and extends the original code while preserving its attrib
 
 ## Download and installation
 
-**[Download Magic Mouse Toolkit Personal v1.0.0 (macOS)](https://github.com/drfcy/magic-mouse-toolkit/releases/download/v1.0.0/Magic-Mouse-Toolkit-Personal-v1.0.0-macOS.zip)** · [Release notes](https://github.com/drfcy/magic-mouse-toolkit/releases/tag/v1.0.0)
+**[Download Magic Mouse Toolkit Personal v1.0.1 (macOS)](https://github.com/drfcy/magic-mouse-toolkit/releases/download/v1.0.1/Magic-Mouse-Toolkit-Personal-v1.0.1-macOS.zip)** · [Release notes](https://github.com/drfcy/magic-mouse-toolkit/releases/tag/v1.0.1)
 
 - Requirements: macOS 26 or later, an Apple Silicon or Intel Mac, and Apple Magic Mouse.
 - Download and extract the ZIP, drag `Magic Mouse Toolkit.app` into Applications, and open it.
@@ -185,7 +185,7 @@ This project is distributed under GNU GPL v3.0 only. See [THIRD_PARTY_NOTICES.md
 
 ## 下载与安装
 
-**[下载 Magic Mouse Toolkit Personal v1.0.0（macOS）](https://github.com/drfcy/magic-mouse-toolkit/releases/download/v1.0.0/Magic-Mouse-Toolkit-Personal-v1.0.0-macOS.zip)** · [查看版本说明](https://github.com/drfcy/magic-mouse-toolkit/releases/tag/v1.0.0)
+**[下载 Magic Mouse Toolkit Personal v1.0.1（macOS）](https://github.com/drfcy/magic-mouse-toolkit/releases/download/v1.0.1/Magic-Mouse-Toolkit-Personal-v1.0.1-macOS.zip)** · [查看版本说明](https://github.com/drfcy/magic-mouse-toolkit/releases/tag/v1.0.1)
 
 - 要求：macOS 26 或更高版本；支持 Apple 芯片和 Intel Mac；需要 Apple Magic Mouse。
 - 下载并解压 ZIP，将 `Magic Mouse Toolkit.app` 拖入“应用程序”文件夹后打开。
